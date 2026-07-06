@@ -48,10 +48,9 @@ func createChangesetEx(ctx *Context, driverName string, driverExtraInfo map[stri
 		"base":     base,
 		"modified": modified,
 	}
-	if driverExtraInfo != nil {
-		for k, v := range driverExtraInfo {
-			conn[k] = v
-		}
+
+	for k, v := range driverExtraInfo {
+		conn[k] = v
 	}
 	if err := drv.Open(conn); err != nil {
 		return wrapDriverError(ctx, "Unable to open databases for createChangeset", err)
@@ -88,10 +87,8 @@ func applyChangesetEx(ctx *Context, driverName string, driverExtraInfo map[strin
 
 	drv := newDriver(ctx, driverName)
 	conn := map[string]string{"base": base}
-	if driverExtraInfo != nil {
-		for k, v := range driverExtraInfo {
-			conn[k] = v
-		}
+	for k, v := range driverExtraInfo {
+		conn[k] = v
 	}
 	if err := drv.Open(conn); err != nil {
 		return wrapDriverError(ctx, "Unable to open database for applyChangeset", err)
