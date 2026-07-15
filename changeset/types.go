@@ -14,7 +14,7 @@ import (
 // Possible types mirror SQLite's storage classes plus an Undefined type
 // used in UPDATE entries to indicate an unmodified column.
 type Value struct {
-	mType    ValueType
+	typ      ValueType
 	intVal   int64
 	floatVal float64
 	strVal   string
@@ -46,78 +46,78 @@ const (
 
 // NewValueInt creates a Value holding an int64.
 func NewValueInt(n int64) Value {
-	return Value{mType: TypeInt, intVal: n}
+	return Value{typ: TypeInt, intVal: n}
 }
 
 // NewValueDouble creates a Value holding a float64.
 func NewValueDouble(n float64) Value {
-	return Value{mType: TypeDouble, floatVal: n}
+	return Value{typ: TypeDouble, floatVal: n}
 }
 
 // NewValueText creates a Value holding a text string.
 func NewValueText(s string) Value {
-	return Value{mType: TypeText, strVal: s}
+	return Value{typ: TypeText, strVal: s}
 }
 
 // NewValueBlob creates a Value holding binary data.
 func NewValueBlob(b []byte) Value {
-	return Value{mType: TypeBlob, blobVal: b}
+	return Value{typ: TypeBlob, blobVal: b}
 }
 
 // NewValueNull creates a Value representing SQL NULL.
 func NewValueNull() Value {
-	return Value{mType: TypeNull}
+	return Value{typ: TypeNull}
 }
 
 // NewValueUndefined creates an undefined Value (column not modified).
 func NewValueUndefined() Value {
-	return Value{mType: TypeUndefined}
+	return Value{typ: TypeUndefined}
 }
 
 // Type returns the ValueType of this value.
-func (v Value) Type() ValueType { return v.mType }
+func (v Value) Type() ValueType { return v.typ }
 
 // IsUndefined returns true if the value type is Undefined.
-func (v Value) IsUndefined() bool { return v.mType == TypeUndefined }
+func (v Value) IsUndefined() bool { return v.typ == TypeUndefined }
 
 // IsNull returns true if the value type is Null.
-func (v Value) IsNull() bool { return v.mType == TypeNull }
+func (v Value) IsNull() bool { return v.typ == TypeNull }
 
 // AsInt returns the integer value. Returns an error if type is not TypeInt.
 func (v Value) AsInt() (int64, error) {
-	if v.mType != TypeInt {
-		return 0, fmt.Errorf("Value.AsInt called on %s", v.mType)
+	if v.typ != TypeInt {
+		return 0, fmt.Errorf("Value.AsInt called on %s", v.typ)
 	}
 	return v.intVal, nil
 }
 
 // AsDouble returns the double value. Returns an error if type is not TypeDouble.
 func (v Value) AsDouble() (float64, error) {
-	if v.mType != TypeDouble {
-		return 0, fmt.Errorf("Value.AsDouble called on %s", v.mType)
+	if v.typ != TypeDouble {
+		return 0, fmt.Errorf("Value.AsDouble called on %s", v.typ)
 	}
 	return v.floatVal, nil
 }
 
 // AsText returns the text value. Returns an error if type is not TypeText or TypeBlob.
 func (v Value) AsText() (string, error) {
-	if v.mType != TypeText && v.mType != TypeBlob {
-		return "", fmt.Errorf("Value.AsText called on %s", v.mType)
+	if v.typ != TypeText && v.typ != TypeBlob {
+		return "", fmt.Errorf("Value.AsText called on %s", v.typ)
 	}
 	return v.strVal, nil
 }
 
 // AsBlob returns the blob value. Returns an error if type is not TypeText or TypeBlob.
 func (v Value) AsBlob() ([]byte, error) {
-	if v.mType != TypeText && v.mType != TypeBlob {
-		return nil, fmt.Errorf("Value.AsBlob called on %s", v.mType)
+	if v.typ != TypeText && v.typ != TypeBlob {
+		return nil, fmt.Errorf("Value.AsBlob called on %s", v.typ)
 	}
 	return v.blobVal, nil
 }
 
 // String returns a human-readable representation of the value.
 func (v Value) String() string {
-	switch v.mType {
+	switch v.typ {
 	case TypeUndefined:
 		return "undefined"
 	case TypeInt:
@@ -137,10 +137,10 @@ func (v Value) String() string {
 
 // Equal reports whether two Values are equal.
 func (v Value) Equal(other Value) bool {
-	if v.mType != other.mType {
+	if v.typ != other.typ {
 		return false
 	}
-	switch v.mType {
+	switch v.typ {
 	case TypeUndefined, TypeNull:
 		return true
 	case TypeInt:

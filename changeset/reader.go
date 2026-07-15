@@ -31,7 +31,7 @@ type Reader struct {
 	buf    []byte
 	offset int
 
-	mCurrentTable ChangesetTable // currently processed table
+	currentTable ChangesetTable // currently processed table
 }
 
 // NewReader opens a changeset file and loads its contents into memory.
@@ -70,7 +70,7 @@ func (r *Reader) NextEntry() (*ChangesetEntry, error) {
 
 			entry := &ChangesetEntry{
 				Op:    OperationType(typ),
-				Table: r.mCurrentTable,
+				Table: r.currentTable,
 			}
 
 			if typ != byte(OpInsert) {
@@ -100,7 +100,7 @@ func (r *Reader) IsEmpty() bool {
 // and clears the current table state.
 func (r *Reader) Rewind() {
 	r.offset = 0
-	r.mCurrentTable = ChangesetTable{}
+	r.currentTable = ChangesetTable{}
 }
 
 // Close releases resources. After Close, the reader cannot be reused.
@@ -143,7 +143,7 @@ func (r *Reader) readNullTerminatedString() (string, error) {
 }
 
 func (r *Reader) readRowValues(values *[]Value) error {
-	nCol := r.mCurrentTable.ColumnCount()
+	nCol := r.currentTable.ColumnCount()
 	if len(*values) != nCol {
 		*values = make([]Value, nCol)
 	}
@@ -223,20 +223,20 @@ func (r *Reader) readTableRecord() error {
 		return r.readerError("readTableRecord: unexpected number of columns")
 	}
 
-	r.mCurrentTable.PrimaryKeys = make([]bool, nCol)
+	r.currentTable.PrimaryKeys = make([]bool, nCol)
 	for i := 0; i < nCol; i++ {
 		b, err := r.readByte()
 		if err != nil {
 			return err
 		}
-		r.mCurrentTable.PrimaryKeys[i] = b != 0
+		r.currentTable.PrimaryKeys[i] = b != 0
 	}
 
 	name, err := r.readNullTerminatedString()
 	if err != nil {
 		return err
 	}
-	r.mCurrentTable.Name = name
+	r.currentTable.Name = name
 	return nil
 }
 

@@ -29,8 +29,8 @@ import (
 type Writer struct {
 	file *os.File
 
-	mCurrentTable ChangesetTable // currently processed table
-	tmp           [varint.MaxVarintLen]byte
+	currentTable ChangesetTable // currently processed table
+	tmp          [varint.MaxVarintLen]byte
 }
 
 // NewWriter creates a new changeset file (overwrites if it exists).
@@ -45,7 +45,7 @@ func NewWriter(filename string) (*Writer, error) {
 // BeginTable writes the table header. All subsequent calls to WriteEntry
 // are associated with this table until the next call to BeginTable.
 func (w *Writer) BeginTable(table ChangesetTable) error {
-	w.mCurrentTable = table
+	w.currentTable = table
 
 	if err := w.writeByte('T'); err != nil {
 		return err
@@ -118,11 +118,11 @@ func (w *Writer) writeNullTerminatedString(s string) error {
 }
 
 func (w *Writer) writeRowValues(values []Value) error {
-	if len(values) != w.mCurrentTable.ColumnCount() {
+	if len(values) != w.currentTable.ColumnCount() {
 		return fmt.Errorf("writer error: wrong number of rows in the entry")
 	}
 
-	for i := 0; i < w.mCurrentTable.ColumnCount(); i++ {
+	for i := 0; i < w.currentTable.ColumnCount(); i++ {
 		typ := values[i].Type()
 		if err := w.writeByte(byte(typ)); err != nil {
 			return err

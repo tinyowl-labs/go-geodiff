@@ -16,7 +16,7 @@ import (
 type Logger interface {
 	Debug(msg string)
 	Info(msg string)
-	Warn(msg string)
+	Warning(msg string)
 	Error(msg string)
 }
 
@@ -337,7 +337,7 @@ func postgresToBaseColumn(logger Logger, columnType string, isGeometry bool) Tab
 
 	default:
 		if logger != nil {
-			logger.Warn("Converting PostgreSQL type " + columnType + " to base type unsuccessful, using text.")
+			logger.Warning("Converting PostgreSQL type " + columnType + " to base type unsuccessful, using text.")
 		}
 		t.BaseType = BaseText
 	}

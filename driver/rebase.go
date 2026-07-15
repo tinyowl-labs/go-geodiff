@@ -915,10 +915,10 @@ func RebaseDirect(
 
 // conflictItemJSON is the JSON-serializable form of a ConflictItem.
 type conflictItemJSON struct {
-	Column int         `json:"column"`
-	Base   interface{} `json:"base,omitempty"`
-	Old    interface{} `json:"old,omitempty"`
-	New    interface{} `json:"new,omitempty"`
+	Column int `json:"column"`
+	Base   any `json:"base,omitempty"`
+	Old    any `json:"old,omitempty"`
+	New    any `json:"new,omitempty"`
 }
 
 // conflictFeatureJSON is the JSON-serializable form of a ConflictFeature.
@@ -934,8 +934,8 @@ type conflictsJSON struct {
 	Geodiff []conflictFeatureJSON `json:"geodiff"`
 }
 
-// valueToJSON converts a changeset.Value to a JSON-compatible interface{}.
-func valueToJSON(v changeset.Value) interface{} {
+// valueToJSON converts a changeset.Value to a JSON-compatible any value.
+func valueToJSON(v changeset.Value) any {
 	switch v.Type() {
 	case changeset.TypeUndefined:
 		return nil

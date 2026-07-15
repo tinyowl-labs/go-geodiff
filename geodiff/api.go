@@ -9,7 +9,6 @@ package geodiff
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -342,7 +341,7 @@ func changesetToJSON(reader *changeset.Reader) ([]byte, error) {
 	}
 
 	// Wrap in {"geodiff": [...]} like the C++ version.
-	output := map[string]interface{}{
+	output := map[string]any{
 		"geodiff": entries,
 	}
 	return json.MarshalIndent(output, "", "  ")
@@ -393,7 +392,7 @@ func changesetToJSONSummary(reader *changeset.Reader) ([]byte, error) {
 		})
 	}
 
-	output := map[string]interface{}{
+	output := map[string]any{
 		"geodiff_summary": out,
 	}
 	return json.MarshalIndent(output, "", "  ")
@@ -486,7 +485,7 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	}
 	defer srcDriver.Close()
 
-	tableNames, err := srcDriver.ListTables(context.Background(), false)
+	tableNames, err := srcDriver.ListTables(context.Background(), driver.BaseSide)
 	if err != nil {
 		return wrapDriverError(ctx, "Failed to list source tables", err)
 	}
@@ -494,7 +493,7 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 
 	var tables []*schema.TableSchema
 	for _, name := range tableNames {
-		tbl, err := srcDriver.TableSchema(context.Background(), name, false)
+		tbl, err := srcDriver.TableSchema(context.Background(), name, driver.BaseSide)
 		if err != nil {
 			return wrapDriverError(ctx, "Failed to read table schema: "+name, err)
 		}
@@ -508,7 +507,7 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	if err != nil {
 		return wrapError(ctx, "Failed to create temporary changeset", err)
 	}
-	if err := srcDriver.DumpData(context.Background(), w, false); err != nil {
+	if err := srcDriver.DumpData(context.Background(), w, driver.BaseSide); err != nil {
 		w.Close()
 		return wrapDriverError(ctx, "Failed to dump source data", err)
 	}
@@ -567,14 +566,14 @@ func MakeCopySqlite(src, dst string) error {
 	}
 	defer srcDriver.Close()
 
-	tableNames, err := srcDriver.ListTables(context.Background(), false)
+	tableNames, err := srcDriver.ListTables(context.Background(), driver.BaseSide)
 	if err != nil {
 		return wrapDriverError(ctx, "makeCopySqlite: Failed to list source tables", err)
 	}
 
 	var tables []*schema.TableSchema
 	for _, name := range tableNames {
-		tbl, err := srcDriver.TableSchema(context.Background(), name, false)
+		tbl, err := srcDriver.TableSchema(context.Background(), name, driver.BaseSide)
 		if err != nil {
 			return wrapDriverError(ctx, "makeCopySqlite: Failed to read schema for table: "+name, err)
 		}
@@ -588,7 +587,7 @@ func MakeCopySqlite(src, dst string) error {
 	if err != nil {
 		return wrapError(ctx, "makeCopySqlite: Failed to create temp changeset", err)
 	}
-	if err := srcDriver.DumpData(context.Background(), w, false); err != nil {
+	if err := srcDriver.DumpData(context.Background(), w, driver.BaseSide); err != nil {
 		w.Close()
 		return wrapDriverError(ctx, "makeCopySqlite: Failed to dump source data", err)
 	}
@@ -645,7 +644,7 @@ func DumpData(driverName, extraInfo, src, changesetPath string) error {
 	}
 	defer w.Close()
 
-	if err := drv.DumpData(context.Background(), w, false); err != nil {
+	if err := drv.DumpData(context.Background(), w, driver.BaseSide); err != nil {
 		return wrapDriverError(ctx, "Failed to dump data", err)
 	}
 	return nil
@@ -671,14 +670,14 @@ func CreateInitialDiff(src, changesetPath string) error {
 	defer drv.Close()
 
 	// Collect table schemas.
-	tableNames, err := drv.ListTables(context.Background(), false)
+	tableNames, err := drv.ListTables(context.Background(), driver.BaseSide)
 	if err != nil {
 		return wrapDriverError(ctx, "Failed to list tables", err)
 	}
 
 	var schemas []*schema.TableSchema
 	for _, name := range tableNames {
-		tbl, err := drv.TableSchema(context.Background(), name, false)
+		tbl, err := drv.TableSchema(context.Background(), name, driver.BaseSide)
 		if err != nil {
 			return wrapDriverError(ctx, "Failed to read schema: "+name, err)
 		}
@@ -725,7 +724,7 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 	}
 	defer drv.Close()
 
-	tableNames, err := drv.ListTables(context.Background(), false)
+	tableNames, err := drv.ListTables(context.Background(), driver.BaseSide)
 	if err != nil {
 		return wrapDriverError(ctx, "Failed to list tables", err)
 	}
@@ -758,7 +757,7 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 
 	var tables []tableJSON
 	for _, name := range tableNames {
-		tbl, err := drv.TableSchema(context.Background(), name, false)
+		tbl, err := drv.TableSchema(context.Background(), name, driver.BaseSide)
 		if err != nil {
 			return wrapDriverError(ctx, "Failed to read schema for table: "+name, err)
 		}
@@ -804,7 +803,7 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 		tables = append(tables, tj)
 	}
 
-	output := map[string]interface{}{
+	output := map[string]any{
 		"geodiff_schema": tables,
 	}
 	data, err := json.MarshalIndent(output, "", "  ")
@@ -1244,11 +1243,3 @@ func wrapDriverError(ctx *Context, contextMsg string, err error) error {
 	}
 	return NewGeoDiffError(msg)
 }
-
-// init registers the sqlite driver import side effect — included at package level.
-var _ = func() int {
-	// Ensure sqlite driver is registered by referencing the import.
-	// The import above already pulls it in, but this makes it explicit.
-	_ = sql.Drivers
-	return 0
-}()

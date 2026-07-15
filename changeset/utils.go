@@ -52,7 +52,7 @@ func BinToHex(data []byte) string {
 // The returned bool indicates whether the value should be included
 // (false for TypeUndefined). For TypeNull, returns (nil, true) so the
 // caller emits JSON null.
-func valueToJSON(v Value) (interface{}, bool) {
+func valueToJSON(v Value) (any, bool) {
 	switch v.Type() {
 	case TypeUndefined:
 		return nil, false
@@ -79,7 +79,7 @@ func valueToJSON(v Value) (interface{}, bool) {
 
 // changesetEntryToJSON converts a single ChangesetEntry to a
 // map suitable for JSON marshalling (TableName → table key, etc.).
-func changesetEntryToJSON(entry *ChangesetEntry) (map[string]interface{}, error) {
+func changesetEntryToJSON(entry *ChangesetEntry) (map[string]any, error) {
 	var status string
 	switch entry.Op {
 	case OpInsert:
@@ -102,7 +102,7 @@ func changesetEntryToJSON(entry *ChangesetEntry) (map[string]interface{}, error)
 		return nil, fmt.Errorf("table column count doesn't match old value list size")
 	}
 
-	changes := make([]map[string]interface{}, 0)
+	changes := make([]map[string]any, 0)
 
 	for i := 0; i < nCol; i++ {
 		var valueNew, valueOld Value
@@ -120,7 +120,7 @@ func changesetEntryToJSON(entry *ChangesetEntry) (map[string]interface{}, error)
 		jsonValueOld, includeOld := valueToJSON(valueOld)
 		jsonValueNew, includeNew := valueToJSON(valueNew)
 
-		change := map[string]interface{}{"column": i}
+		change := map[string]any{"column": i}
 
 		if includeOld {
 			change["old"] = jsonValueOld
@@ -132,7 +132,7 @@ func changesetEntryToJSON(entry *ChangesetEntry) (map[string]interface{}, error)
 		changes = append(changes, change)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"table":   entry.Table.Name,
 		"type":    status,
 		"changes": changes,
@@ -142,7 +142,7 @@ func changesetEntryToJSON(entry *ChangesetEntry) (map[string]interface{}, error)
 // ChangesetToJSON reads all entries from reader and returns the full
 // changeset as JSON bytes. The top-level key is "geodiff".
 func ChangesetToJSON(reader *Reader) ([]byte, error) {
-	entries := make([]map[string]interface{}, 0)
+	entries := make([]map[string]any, 0)
 
 	for {
 		entry, err := reader.NextEntry()
@@ -160,7 +160,7 @@ func ChangesetToJSON(reader *Reader) ([]byte, error) {
 		entries = append(entries, msg)
 	}
 
-	return json.Marshal(map[string]interface{}{"geodiff": entries})
+	return json.Marshal(map[string]any{"geodiff": entries})
 }
 
 // ChangesetToJSONSummary reads all entries from reader and returns a summary
@@ -200,9 +200,9 @@ func ChangesetToJSONSummary(reader *Reader) ([]byte, error) {
 		}
 	}
 
-	entries := make([]map[string]interface{}, 0, len(summary))
+	entries := make([]map[string]any, 0, len(summary))
 	for tableName, ts := range summary {
-		entries = append(entries, map[string]interface{}{
+		entries = append(entries, map[string]any{
 			"table":  tableName,
 			"insert": ts.inserts,
 			"update": ts.updates,
@@ -210,17 +210,17 @@ func ChangesetToJSONSummary(reader *Reader) ([]byte, error) {
 		})
 	}
 
-	return json.Marshal(map[string]interface{}{"geodiff_summary": entries})
+	return json.Marshal(map[string]any{"geodiff_summary": entries})
 }
 
 // ----- Conflicts to JSON -----
 
 // conflictToJSON converts a single ConflictFeature to a JSON-compatible map.
-func conflictToJSON(cf *ConflictFeature) (map[string]interface{}, error) {
-	changes := make([]map[string]interface{}, 0, len(cf.Items))
+func conflictToJSON(cf *ConflictFeature) (map[string]any, error) {
+	changes := make([]map[string]any, 0, len(cf.Items))
 
 	for _, item := range cf.Items {
-		change := map[string]interface{}{"column": item.Column}
+		change := map[string]any{"column": item.Column}
 
 		valBase, incBase := valueToJSON(item.Base)
 		valTheirs, incTheirs := valueToJSON(item.Theirs)
@@ -239,7 +239,7 @@ func conflictToJSON(cf *ConflictFeature) (map[string]interface{}, error) {
 		changes = append(changes, change)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"table":   cf.TableName,
 		"type":    "conflict",
 		"fid":     fmt.Sprintf("%d", cf.PK),
@@ -250,7 +250,7 @@ func conflictToJSON(cf *ConflictFeature) (map[string]interface{}, error) {
 // ConflictsToJSON converts a slice of ConflictFeature to JSON bytes.
 // The top-level key is "geodiff".
 func ConflictsToJSON(conflicts []ConflictFeature) ([]byte, error) {
-	entries := make([]map[string]interface{}, 0, len(conflicts))
+	entries := make([]map[string]any, 0, len(conflicts))
 
 	for i := range conflicts {
 		msg, err := conflictToJSON(&conflicts[i])
@@ -260,7 +260,7 @@ func ConflictsToJSON(conflicts []ConflictFeature) ([]byte, error) {
 		entries = append(entries, msg)
 	}
 
-	return json.Marshal(map[string]interface{}{"geodiff": entries})
+	return json.Marshal(map[string]any{"geodiff": entries})
 }
 
 // ----- Invert -----

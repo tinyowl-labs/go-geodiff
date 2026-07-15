@@ -7,12 +7,21 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	_ "modernc.org/sqlite"
 
 	"github.com/tinyowl-labs/go-geodiff/changeset"
 	"github.com/tinyowl-labs/go-geodiff/schema"
+)
+
+// Side indicates which database to query (base or modified).
+type Side int
+
+const (
+	BaseSide     Side = iota // base (original) database
+	ModifiedSide             // modified database
 )
 
 // quoteIdent returns a properly quoted SQLite identifier.
@@ -41,8 +50,8 @@ type Connector interface {
 
 // SchemaReader reads database table schemas.
 type SchemaReader interface {
-	ListTables(ctx context.Context, useModified bool) ([]string, error)
-	TableSchema(ctx context.Context, tableName string, useModified bool) (*schema.TableSchema, error)
+	ListTables(ctx context.Context, side Side) ([]string, error)
+	TableSchema(ctx context.Context, tableName string, side Side) (*schema.TableSchema, error)
 }
 
 // DiffWriter creates changesets by comparing two databases.
@@ -54,7 +63,7 @@ type DiffWriter interface {
 type DiffApplier interface {
 	ApplyChangeset(ctx context.Context, reader *changeset.Reader) error
 	CreateTables(ctx context.Context, tables []*schema.TableSchema) error
-	DumpData(ctx context.Context, writer *changeset.Writer, useModified bool) error
+	DumpData(ctx context.Context, writer *changeset.Writer, side Side) error
 }
 
 // Driver is the full interface for all geodiff backends.
@@ -77,14 +86,14 @@ func NewSqliteDriver() *SqliteDriver {
 	return &SqliteDriver{}
 }
 
-func (d *SqliteDriver) databaseName(useModified bool) (string, error) {
+func (d *SqliteDriver) databaseName(side Side) (string, error) {
 	if d.hasModified {
-		if useModified {
+		if side == ModifiedSide {
 			return "main", nil
 		}
 		return "aux", nil
 	}
-	if useModified {
+	if side == ModifiedSide {
 		return "", fmt.Errorf("'modified' database not open")
 	}
 	return "main", nil
@@ -122,13 +131,13 @@ func (d *SqliteDriver) Open(ctx context.Context, conn map[string]string) error {
 
 	if d.hasModified {
 		attachSQL := fmt.Sprintf("ATTACH DATABASE '%s' AS aux", strings.ReplaceAll(base, "'", "''"))
-		if _, err := d.db.Exec(attachSQL); err != nil {
+		if _, err := d.db.ExecContext(context.Background(), attachSQL); err != nil {
 			d.db.Close()
 			return fmt.Errorf("unable to attach database: %w", err)
 		}
 	}
 
-	if _, err := d.db.Exec("PRAGMA foreign_keys = 1"); err != nil {
+	if _, err := d.db.ExecContext(context.Background(), "PRAGMA foreign_keys = 1"); err != nil {
 		d.db.Close()
 		return fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
@@ -154,7 +163,7 @@ func (d *SqliteDriver) Create(ctx context.Context, conn map[string]string, overw
 		return fmt.Errorf("unable to create %s as sqlite3 database: %w", base, err)
 	}
 	// Force file creation by executing a statement
-	if _, err := d.db.Exec("SELECT 1"); err != nil {
+	if _, err := d.db.ExecContext(context.Background(), "SELECT 1"); err != nil {
 		d.db.Close()
 		return fmt.Errorf("unable to initialize %s: %w", base, err)
 	}
@@ -170,9 +179,8 @@ func (d *SqliteDriver) Close() error {
 }
 
 // ListTables returns all user table names (excluding GPKG system tables).
-func (d *SqliteDriver) ListTables(ctx context.Context, useModified bool) ([]string, error) {
-	_ = ctx
-	dbName, err := d.databaseName(useModified)
+func (d *SqliteDriver) ListTables(ctx context.Context, side Side) ([]string, error) {
+	dbName, err := d.databaseName(side)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +188,7 @@ func (d *SqliteDriver) ListTables(ctx context.Context, useModified bool) ([]stri
 		WHERE type='table' AND sql NOT LIKE 'CREATE VIRTUAL%%%%'
 		ORDER BY name`, dbName)
 
-	rows, err := d.db.Query(query)
+	rows, err := d.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list SQLite tables: %w", err)
 	}
@@ -212,7 +220,7 @@ func (d *SqliteDriver) ListTables(ctx context.Context, useModified bool) ([]stri
 func (d *SqliteDriver) tableExists(tableName, dbName string) (bool, error) {
 	query := fmt.Sprintf("SELECT name FROM %s.sqlite_master WHERE type='table' AND name='%s'",
 		dbName, strings.ReplaceAll(tableName, "'", "''"))
-	rows, err := d.db.Query(query)
+	rows, err := d.db.QueryContext(context.Background(), query)
 	if err != nil {
 		return false, err
 	}
@@ -221,9 +229,8 @@ func (d *SqliteDriver) tableExists(tableName, dbName string) (bool, error) {
 }
 
 // TableSchema returns the table schema for the given table.
-func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useModified bool) (*schema.TableSchema, error) {
-	_ = ctx
-	dbName, err := d.databaseName(useModified)
+func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, side Side) (*schema.TableSchema, error) {
+	dbName, err := d.databaseName(side)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +247,7 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useMod
 
 	pragmaQuery := fmt.Sprintf("PRAGMA '%s'.table_info('%s')",
 		dbName, strings.ReplaceAll(tableName, "'", "''"))
-	rows, err := d.db.Query(pragmaQuery)
+	rows, err := d.db.QueryContext(ctx, pragmaQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table info for %s: %w", tableName, err)
 	}
@@ -278,7 +285,7 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useMod
 		srsId := -1
 		geomQuery := fmt.Sprintf("SELECT * FROM %s.gpkg_geometry_columns WHERE table_name = '%s'",
 			dbName, strings.ReplaceAll(tableName, "'", "''"))
-		geomRows, gErr := d.db.Query(geomQuery)
+		geomRows, gErr := d.db.QueryContext(ctx, geomQuery)
 		if gErr == nil {
 			for geomRows.Next() {
 				var gTableName, colName, geomTypeName string
@@ -312,7 +319,7 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useMod
 
 		if srsId != -1 {
 			crsQuery := fmt.Sprintf("SELECT * FROM %s.gpkg_spatial_ref_sys WHERE srs_id = %d", dbName, srsId)
-			crsRows, cErr := d.db.Query(crsQuery)
+			crsRows, cErr := d.db.QueryContext(ctx, crsQuery)
 			if cErr != nil {
 				return nil, fmt.Errorf("failed to query gpkg_spatial_ref_sys: %w", cErr)
 			}
@@ -405,7 +412,7 @@ func sqlFindModified(tableName string, tbl *schema.TableSchema) string {
 		qTable, qTable, exprPk.String(), exprOther.String())
 }
 
-func changesetValue(val interface{}) changeset.Value {
+func changesetValue(val any) changeset.Value {
 	if val == nil {
 		return changeset.NewValueNull()
 	}
@@ -434,8 +441,8 @@ func schemaToChangesetTable(tableName string, tbl *schema.TableSchema) changeset
 }
 
 func scanRowValues(rows *sql.Rows, numColumns int) ([]changeset.Value, error) {
-	vals := make([]interface{}, numColumns)
-	ptrs := make([]interface{}, numColumns)
+	vals := make([]any, numColumns)
+	ptrs := make([]any, numColumns)
 	for i := range vals {
 		ptrs[i] = &vals[i]
 	}
@@ -453,7 +460,7 @@ func handleInserted(db *sql.DB, tableName string, tbl *schema.TableSchema, rever
 	writer *changeset.Writer, first *bool) error {
 
 	sqlStr := sqlFindInserted(tableName, tbl, reverse)
-	rows, err := db.Query(sqlStr)
+	rows, err := db.QueryContext(context.Background(), sqlStr)
 	if err != nil {
 		return fmt.Errorf("failed to query inserted rows for %s: %w", tableName, err)
 	}
@@ -496,7 +503,7 @@ func valuesEqual(a, b changeset.Value) bool {
 
 func checkDatetimeDiff(db *sql.DB, v1, v2 changeset.Value) bool {
 	query := "SELECT STRFTIME('%Y-%m-%d %H:%M:%f', ?1) IS NOT STRFTIME('%Y-%m-%d %H:%M:%f', ?2)"
-	var s1, s2 interface{}
+	var s1, s2 any
 	if v1.Type() == changeset.TypeNull {
 		s1 = nil
 	} else if v1.Type() == changeset.TypeText {
@@ -512,7 +519,7 @@ func checkDatetimeDiff(db *sql.DB, v1, v2 changeset.Value) bool {
 		return true
 	}
 	var result int
-	if err := db.QueryRow(query, s1, s2).Scan(&result); err != nil {
+	if err := db.QueryRowContext(context.Background(), query, s1, s2).Scan(&result); err != nil {
 		return true
 	}
 	return result != 0
@@ -522,7 +529,7 @@ func handleUpdated(db *sql.DB, tableName string, tbl *schema.TableSchema,
 	writer *changeset.Writer, first *bool) error {
 
 	sqlStr := sqlFindModified(tableName, tbl)
-	rows, err := db.Query(sqlStr)
+	rows, err := db.QueryContext(context.Background(), sqlStr)
 	if err != nil {
 		return fmt.Errorf("failed to query modified rows for %s: %w", tableName, err)
 	}
@@ -588,24 +595,24 @@ func (d *SqliteDriver) CreateChangeset(ctx context.Context, writer *changeset.Wr
 	if !d.hasModified {
 		return fmt.Errorf("cannot create changeset without modified database")
 	}
-	tablesBase, err := d.ListTables(ctx, false)
+	tablesBase, err := d.ListTables(ctx, BaseSide)
 	if err != nil {
 		return fmt.Errorf("failed to list base tables: %w", err)
 	}
-	tablesModified, err := d.ListTables(ctx, true)
+	tablesModified, err := d.ListTables(ctx, ModifiedSide)
 	if err != nil {
 		return fmt.Errorf("failed to list modified tables: %w", err)
 	}
-	if !stringSlicesEqual(tablesBase, tablesModified) {
+	if !slices.Equal(tablesBase, tablesModified) {
 		return fmt.Errorf("table names are not matching between the input databases.\nBase:     %s\nModified: %s",
 			strings.Join(tablesBase, ", "), strings.Join(tablesModified, ", "))
 	}
 	for _, tableName := range tablesBase {
-		tbl, err := d.TableSchema(ctx, tableName, false)
+		tbl, err := d.TableSchema(ctx, tableName, BaseSide)
 		if err != nil {
 			return err
 		}
-		tblNew, err := d.TableSchema(ctx, tableName, true)
+		tblNew, err := d.TableSchema(ctx, tableName, ModifiedSide)
 		if err != nil {
 			return err
 		}
@@ -629,23 +636,11 @@ func (d *SqliteDriver) CreateChangeset(ctx context.Context, writer *changeset.Wr
 	return nil
 }
 
-func stringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // --- Changeset application ---
 
 func (d *SqliteDriver) applyInsert(tableName string, tbl *schema.TableSchema, entry *changeset.ChangesetEntry) (ChangeApplyResult, error) {
 	var cols, placeholders strings.Builder
-	args := make([]interface{}, 0, len(tbl.Columns))
+	args := make([]any, 0, len(tbl.Columns))
 	for i, c := range tbl.Columns {
 		if i > 0 {
 			cols.WriteString(", ")
@@ -657,7 +652,7 @@ func (d *SqliteDriver) applyInsert(tableName string, tbl *schema.TableSchema, en
 	}
 
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quoteIdent(tableName), cols.String(), placeholders.String())
-	result, err := d.db.Exec(sqlStr, args...)
+	result, err := d.db.ExecContext(context.Background(), sqlStr, args...)
 	if err != nil {
 		if isConstraintError(err) {
 			return ApplyConstraintConflict, nil
@@ -673,7 +668,7 @@ func (d *SqliteDriver) applyInsert(tableName string, tbl *schema.TableSchema, en
 
 func (d *SqliteDriver) applyUpdate(tableName string, tbl *schema.TableSchema, entry *changeset.ChangesetEntry) (ChangeApplyResult, error) {
 	var sets, where strings.Builder
-	args := make([]interface{}, 0, len(tbl.Columns)*2)
+	args := make([]any, 0, len(tbl.Columns)*2)
 
 	for i, c := range tbl.Columns {
 		vNew := entry.NewValues[i]
@@ -708,7 +703,7 @@ func (d *SqliteDriver) applyUpdate(tableName string, tbl *schema.TableSchema, en
 	}
 
 	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", quoteIdent(tableName), sets.String(), where.String())
-	result, err := d.db.Exec(sqlStr, args...)
+	result, err := d.db.ExecContext(context.Background(), sqlStr, args...)
 	if err != nil {
 		if isConstraintError(err) {
 			return ApplyConstraintConflict, nil
@@ -724,7 +719,7 @@ func (d *SqliteDriver) applyUpdate(tableName string, tbl *schema.TableSchema, en
 
 func (d *SqliteDriver) applyDelete(tableName string, tbl *schema.TableSchema, entry *changeset.ChangesetEntry) (ChangeApplyResult, error) {
 	var where strings.Builder
-	args := make([]interface{}, 0, len(tbl.Columns))
+	args := make([]any, 0, len(tbl.Columns))
 
 	for i, c := range tbl.Columns {
 		vOld := entry.OldValues[i]
@@ -742,7 +737,7 @@ func (d *SqliteDriver) applyDelete(tableName string, tbl *schema.TableSchema, en
 	}
 
 	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(tableName), where.String())
-	result, err := d.db.Exec(sqlStr, args...)
+	result, err := d.db.ExecContext(context.Background(), sqlStr, args...)
 	if err != nil {
 		if isConstraintError(err) {
 			return ApplyConstraintConflict, nil
@@ -765,7 +760,7 @@ func (d *SqliteDriver) applyChange(ctx context.Context, state map[string]*schema
 
 	tbl, ok := state[tableName]
 	if !ok {
-		schemaTbl, err := d.TableSchema(ctx, tableName, false)
+		schemaTbl, err := d.TableSchema(ctx, tableName, BaseSide)
 		if err != nil {
 			return ApplyNoChange, err
 		}
@@ -796,7 +791,7 @@ func (d *SqliteDriver) applyChange(ctx context.Context, state map[string]*schema
 	}
 }
 
-func convertValueToInterface(v changeset.Value) interface{} {
+func convertValueToInterface(v changeset.Value) any {
 	switch v.Type() {
 	case changeset.TypeUndefined:
 		return nil
@@ -834,19 +829,19 @@ func isConstraintError(err error) bool {
 // ApplyChangeset reads a changeset and applies it to the database.
 func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Reader) error {
 	_ = ctx
-	if _, err := d.db.Exec("SAVEPOINT changeset_apply"); err != nil {
+	if _, err := d.db.ExecContext(ctx, "SAVEPOINT changeset_apply"); err != nil {
 		return fmt.Errorf("unable to start savepoint transaction: %w", err)
 	}
 
 	committed := false
 	defer func() {
 		if !committed {
-			d.db.Exec("ROLLBACK TO changeset_apply")
-			d.db.Exec("RELEASE changeset_apply")
+			d.db.ExecContext(context.Background(), "ROLLBACK TO changeset_apply")
+			d.db.ExecContext(context.Background(), "RELEASE changeset_apply")
 		}
 	}()
 
-	if _, err := d.db.Exec("PRAGMA defer_foreign_keys = 1"); err != nil {
+	if _, err := d.db.ExecContext(ctx, "PRAGMA defer_foreign_keys = 1"); err != nil {
 		return fmt.Errorf("failed to defer foreign key checks: %w", err)
 	}
 
@@ -925,7 +920,7 @@ func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Rea
 		return fmt.Errorf("conflicts encountered while applying changes! Total %d", unrecoverableConflicts)
 	}
 
-	if _, err := d.db.Exec("RELEASE changeset_apply"); err != nil {
+	if _, err := d.db.ExecContext(ctx, "RELEASE changeset_apply"); err != nil {
 		return fmt.Errorf("failed to release savepoint: %w", err)
 	}
 	committed = true
@@ -935,7 +930,7 @@ func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Rea
 // initSpatialMetadata creates the GPKG metadata tables if they don't exist.
 func (d *SqliteDriver) initSpatialMetadata() error {
 	// Try the GPKG extension function first
-	rows, err := d.db.Query("SELECT InitSpatialMetadata('main');")
+	rows, err := d.db.QueryContext(context.Background(), "SELECT InitSpatialMetadata('main');")
 	if err == nil {
 		rows.Close()
 		return nil
@@ -999,7 +994,7 @@ func (d *SqliteDriver) initSpatialMetadata() error {
 	}
 
 	for _, ddl := range metadataDDL {
-		if _, err := d.db.Exec(ddl); err != nil {
+		if _, err := d.db.ExecContext(context.Background(), ddl); err != nil {
 			return fmt.Errorf("failure initializing spatial metadata: %w", err)
 		}
 	}
@@ -1052,7 +1047,7 @@ func (d *SqliteDriver) CreateTables(ctx context.Context, tables []*schema.TableS
 		}
 		sqlStr += ");"
 
-		if _, err := d.db.Exec(sqlStr); err != nil {
+		if _, err := d.db.ExecContext(ctx, sqlStr); err != nil {
 			return fmt.Errorf("failure creating table: %s: %w", tbl.Name, err)
 		}
 	}
@@ -1061,14 +1056,14 @@ func (d *SqliteDriver) CreateTables(ctx context.Context, tables []*schema.TableS
 
 func addGpkgCrsDefinition(db *sql.DB, crs *schema.CrsDefinition) error {
 	var count int
-	if err := db.QueryRow("SELECT count(*) FROM gpkg_spatial_ref_sys WHERE srs_id = ?", crs.SrsId).Scan(&count); err != nil {
+	if err := db.QueryRowContext(context.Background(), "SELECT count(*) FROM gpkg_spatial_ref_sys WHERE srs_id = ?", crs.SrsId).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
 	srsName := fmt.Sprintf("%s:%d", crs.AuthName, crs.AuthCode)
-	_, err := db.Exec("INSERT INTO gpkg_spatial_ref_sys VALUES (?, ?, ?, ?, ?, '')",
+	_, err := db.ExecContext(context.Background(), "INSERT INTO gpkg_spatial_ref_sys VALUES (?, ?, ?, ?, ?, '')",
 		srsName, crs.SrsId, crs.AuthName, crs.AuthCode, crs.Wkt)
 	if err != nil {
 		return fmt.Errorf("failed to insert CRS to gpkg_spatial_ref_sys table: %w", err)
@@ -1083,7 +1078,7 @@ func addGpkgSpatialTable(db *sql.DB, tbl *schema.TableSchema) error {
 	}
 	col := tbl.Columns[geomIdx]
 
-	_, err := db.Exec(
+	_, err := db.ExecContext(context.Background(),
 		"INSERT INTO gpkg_contents (table_name, data_type, identifier, min_x, min_y, max_x, max_y, srs_id) VALUES (?, 'features', ?, 0, 0, 0, 0, ?)",
 		tbl.Name, tbl.Name, col.GeomSrsId)
 	if err != nil {
@@ -1097,7 +1092,7 @@ func addGpkgSpatialTable(db *sql.DB, tbl *schema.TableSchema) error {
 	if col.GeomHasM {
 		hasM = 1
 	}
-	_, err = db.Exec("INSERT INTO gpkg_geometry_columns VALUES (?, ?, ?, ?, ?, ?)",
+	_, err = db.ExecContext(context.Background(), "INSERT INTO gpkg_geometry_columns VALUES (?, ?, ?, ?, ?, ?)",
 		tbl.Name, col.Name, col.GeomType, col.GeomSrsId, hasZ, hasM)
 	if err != nil {
 		return fmt.Errorf("failed to insert row to gpkg_geometry_columns table: %w", err)
@@ -1106,18 +1101,17 @@ func addGpkgSpatialTable(db *sql.DB, tbl *schema.TableSchema) error {
 }
 
 // DumpData writes all rows from a database as INSERT operations.
-func (d *SqliteDriver) DumpData(ctx context.Context, writer *changeset.Writer, useModified bool) error {
-	_ = ctx
-	dbName, err := d.databaseName(useModified)
+func (d *SqliteDriver) DumpData(ctx context.Context, writer *changeset.Writer, side Side) error {
+	dbName, err := d.databaseName(side)
 	if err != nil {
 		return err
 	}
-	tables, err := d.ListTables(ctx, useModified)
+	tables, err := d.ListTables(ctx, side)
 	if err != nil {
 		return err
 	}
 	for _, tableName := range tables {
-		tbl, err := d.TableSchema(ctx, tableName, useModified)
+		tbl, err := d.TableSchema(ctx, tableName, side)
 		if err != nil {
 			return err
 		}
@@ -1126,7 +1120,7 @@ func (d *SqliteDriver) DumpData(ctx context.Context, writer *changeset.Writer, u
 		}
 		first := true
 		query := fmt.Sprintf("SELECT * FROM \"%s\".%s", dbName, quoteIdent(tableName))
-		rows, err := d.db.Query(query)
+		rows, err := d.db.QueryContext(ctx, query)
 		if err != nil {
 			return fmt.Errorf("failure dumping changeset: %w", err)
 		}

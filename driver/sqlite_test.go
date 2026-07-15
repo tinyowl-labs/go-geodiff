@@ -105,7 +105,7 @@ func TestListTables_GPKG(t *testing.T) {
 	}
 	defer d.Close()
 
-	tables, err := d.ListTables(context.Background(), false)
+	tables, err := d.ListTables(context.Background(), BaseSide)
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestTableSchema_GPKG(t *testing.T) {
 	}
 	defer d.Close()
 
-	tables, err := d.ListTables(context.Background(), false)
+	tables, err := d.ListTables(context.Background(), BaseSide)
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestTableSchema_GPKG(t *testing.T) {
 	}
 
 	for _, tableName := range tables {
-		schemaTbl, err := d.TableSchema(context.Background(), tableName, false)
+		schemaTbl, err := d.TableSchema(context.Background(), tableName, BaseSide)
 		if err != nil {
 			t.Fatalf("TableSchema(%s) failed: %v", tableName, err)
 		}
@@ -187,7 +187,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter failed: %v", err)
 	}
-	if err := dSrc.DumpData(context.Background(), w, false); err != nil {
+	if err := dSrc.DumpData(context.Background(), w, BaseSide); err != nil {
 		w.Close()
 		dSrc.Close()
 		t.Fatalf("DumpData failed: %v", err)
@@ -196,13 +196,13 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 
 	// Get schemas before closing
 	var schemas []*schema.TableSchema
-	tables, err := dSrc.ListTables(context.Background(), false)
+	tables, err := dSrc.ListTables(context.Background(), BaseSide)
 	if err != nil {
 		dSrc.Close()
 		t.Fatalf("ListTables failed: %v", err)
 	}
 	for _, tableName := range tables {
-		ts, err := dSrc.TableSchema(context.Background(), tableName, false)
+		ts, err := dSrc.TableSchema(context.Background(), tableName, BaseSide)
 		if err != nil {
 			dSrc.Close()
 			t.Fatalf("TableSchema failed: %v", err)
@@ -240,7 +240,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 	r.Close()
 
 	// 5. Verify table count matches
-	dstTables, err := dDst.ListTables(context.Background(), false)
+	dstTables, err := dDst.ListTables(context.Background(), BaseSide)
 	if err != nil {
 		dDst.Close()
 		t.Fatalf("ListTables on dest failed: %v", err)
@@ -329,13 +329,13 @@ func TestTableSchema_HasPrimaryKey(t *testing.T) {
 	}
 	defer d.Close()
 
-	tables, err := d.ListTables(context.Background(), false)
+	tables, err := d.ListTables(context.Background(), BaseSide)
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
 
 	for _, tableName := range tables {
-		ts, err := d.TableSchema(context.Background(), tableName, false)
+		ts, err := d.TableSchema(context.Background(), tableName, BaseSide)
 		if err != nil {
 			t.Fatalf("TableSchema(%s) failed: %v", tableName, err)
 		}
