@@ -1078,9 +1078,12 @@ func rebaseChangesets(ctx *Context, base2theirs, output, their2base string) ([]c
 			}
 			if len(cf.Changes) > 0 {
 				conflicts = append(conflicts, cf)
+				// Don't write the conflicted entry to the changeset.
+				// The row stays at theirs value; caller resolves via conflict JSON.
+				continue
 			}
 
-			// Still write their change.
+			// No conflict — write the entry.
 			if !writtenTables[tableName] {
 				if err := writer.BeginTable(entry.Table); err != nil {
 					return nil, wrapError(ctx, "Failed to write table header", err)

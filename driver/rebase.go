@@ -468,10 +468,11 @@ func handleUpdate(
 				outEntry.OldValues[i] = changeset.NewValueUndefined()
 				outEntry.NewValues[i] = changeset.NewValueUndefined()
 			} else {
-				// Edit conflict: both modified the same column to different values
-				outEntry.OldValues[i] = patchedVal
-				outEntry.NewValues[i] = entry.NewValues[i]
-				entryHasChanges = true
+				// Edit conflict: both modified the same column to different values.
+				// Don't write either value to the changeset — flag conflict only.
+				// The row stays at theirs value; caller must resolve via conflict JSON.
+				outEntry.OldValues[i] = changeset.NewValueUndefined()
+				outEntry.NewValues[i] = changeset.NewValueUndefined()
 				addConflictItem(&cf, i, entry.OldValues[i], patchedVal, entry.NewValues[i])
 			}
 		} else if !patchedVal.IsUndefined() {

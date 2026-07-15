@@ -292,16 +292,15 @@ func TestRebase_ConcurrentUpdateConflict(t *testing.T) {
 		t.Errorf("expected conflict on column 1, got %d", cf.Items[0].Column)
 	}
 
-	// The output entry should exist (it's an update, just with conflicts noted)
+	// The output changeset should NOT contain the conflicting update.
+	// Conflicted rows stay at theirs value; conflicts are reported in the
+	// conflict JSON, not in the changeset.
 	entries, err := readEntries(theirsMerged)
 	if err != nil {
 		t.Fatalf("read entries: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if entries[0].Op != changeset.OpUpdate {
-		t.Errorf("expected UPDATE, got %s", entries[0].Op)
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries (conflicting update skipped), got %d", len(entries))
 	}
 }
 
