@@ -864,7 +864,7 @@ func createRebasedChangesetEx(ctx *Context, driverName string, driverExtraInfo m
 	if len(conflicts) == 0 {
 		ctx.Logger().Debug("No conflicts present")
 	} else {
-		data, _ := json.MarshalIndent(conflicts, "", "  ")
+		data, _ := json.MarshalIndent(conflictsJSON{Geodiff: conflicts}, "", "  ")
 		_ = FlushString(conflictFile, string(data))
 	}
 	return nil
@@ -979,18 +979,23 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 // Rebase logic (changeset-level)
 // ---------------------------------------------------------------------------
 
-// conflictFeature represents a conflict on a single feature row.
+// conflictFeature represents a conflict on a single feature row (C++-compatible format).
 type conflictFeature struct {
-	Table string         `json:"table"`
-	PK    int            `json:"pk"`
-	Items []conflictItem `json:"items"`
+	Table   string         `json:"table"`
+	Type    string         `json:"type"`
+	FID     string         `json:"fid"`
+	Changes []conflictItem `json:"changes"`
 }
 
 type conflictItem struct {
 	Column int             `json:"column"`
-	Base   json.RawMessage `json:"base"`
-	Theirs json.RawMessage `json:"theirs"`
-	Ours   json.RawMessage `json:"ours"`
+	Base   json.RawMessage `json:"base,omitempty"`
+	Old    json.RawMessage `json:"old,omitempty"`
+	New    json.RawMessage `json:"new,omitempty"`
+}
+
+type conflictsJSON struct {
+	Geodiff []conflictFeature `json:"geodiff"`
 }
 
 // rebaseChangesets performs three-way rebase of changesets.
@@ -1045,7 +1050,8 @@ func rebaseChangesets(ctx *Context, base2theirs, output, their2base string) ([]c
 			// For now, we write theirs and flag a conflict.
 			cf := conflictFeature{
 				Table: tableName,
-				PK:    extractPK(entry),
+				Type:  "conflict",
+				FID:   fmt.Sprintf("%d", extractPK(entry)),
 			}
 
 			// Collect conflicting columns.
@@ -1065,13 +1071,13 @@ func rebaseChangesets(ctx *Context, base2theirs, output, their2base string) ([]c
 					ci := conflictItem{
 						Column: i,
 						Base:   valueToJSON(baseV),
-						Theirs: valueToJSON(theirV),
-						Ours:   valueToJSON(ourV),
+						Old:    valueToJSON(theirV),
+						New:    valueToJSON(ourV),
 					}
-					cf.Items = append(cf.Items, ci)
+					cf.Changes = append(cf.Changes, ci)
 				}
 			}
-			if len(cf.Items) > 0 {
+			if len(cf.Changes) > 0 {
 				conflicts = append(conflicts, cf)
 			}
 
