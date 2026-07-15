@@ -32,17 +32,38 @@ const (
 	ApplyNoChange
 )
 
-// Driver is the interface for all geodiff backends.
-type Driver interface {
+// Connector manages database connection lifecycle.
+type Connector interface {
 	Open(ctx context.Context, conn map[string]string) error
 	Create(ctx context.Context, conn map[string]string, overwrite bool) error
+	Close() error
+}
+
+// SchemaReader reads database table schemas.
+type SchemaReader interface {
 	ListTables(ctx context.Context, useModified bool) ([]string, error)
 	TableSchema(ctx context.Context, tableName string, useModified bool) (*schema.TableSchema, error)
+}
+
+// DiffWriter creates changesets by comparing two databases.
+type DiffWriter interface {
 	CreateChangeset(ctx context.Context, writer *changeset.Writer) error
+}
+
+// DiffApplier applies changesets to a database.
+type DiffApplier interface {
 	ApplyChangeset(ctx context.Context, reader *changeset.Reader) error
 	CreateTables(ctx context.Context, tables []*schema.TableSchema) error
 	DumpData(ctx context.Context, writer *changeset.Writer, useModified bool) error
-	Close() error
+}
+
+// Driver is the full interface for all geodiff backends.
+// It composes Connector, SchemaReader, DiffWriter, and DiffApplier.
+type Driver interface {
+	Connector
+	SchemaReader
+	DiffWriter
+	DiffApplier
 }
 
 // SqliteDriver implements Driver for SQLite databases (including GeoPackage).
@@ -803,23 +824,6 @@ func isConstraintError(err error) bool {
 		strings.Contains(msg, "PRIMARY KEY constraint")
 }
 
-// cloneEntry does a shallow copy with its own values slices.
-func cloneEntry(e *changeset.ChangesetEntry) changeset.ChangesetEntry {
-	ce := changeset.ChangesetEntry{
-		Op:    e.Op,
-		Table: e.Table,
-	}
-	if len(e.OldValues) > 0 {
-		ce.OldValues = make([]changeset.Value, len(e.OldValues))
-		copy(ce.OldValues, e.OldValues)
-	}
-	if len(e.NewValues) > 0 {
-		ce.NewValues = make([]changeset.Value, len(e.NewValues))
-		copy(ce.NewValues, e.NewValues)
-	}
-	return ce
-}
-
 // ApplyChangeset reads a changeset and applies it to the database.
 func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Reader) error {
 	_ = ctx
@@ -873,7 +877,7 @@ func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Rea
 			if _, ok := tableCopies[entry.Table.Name]; !ok {
 				tableCopies[entry.Table.Name] = entry.Table.Clone()
 			}
-			cloned := cloneEntry(entry)
+			cloned := *entry.Clone()
 			cloned.Table = *tableCopies[entry.Table.Name]
 			conflictingEntries = append(conflictingEntries, cloned)
 		case ApplyNoChange:

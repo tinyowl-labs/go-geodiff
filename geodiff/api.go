@@ -283,14 +283,7 @@ func valueToJSON(v changeset.Value) json.RawMessage {
 	}
 }
 
-// columnName returns the column name from the table, or an empty string if out of range.
-// NOTE: ChangesetTable does not store column names, so this always returns "".
-func columnName(table changeset.ChangesetTable, idx int) string {
-	_ = table
-	_ = idx
-	return ""
-}
-
+// valueToJSON converts a changeset.Value to a JSON-marshallable representation.
 // changesetToJSON reads all entries and produces a full JSON representation.
 func changesetToJSON(reader *changeset.Reader) ([]byte, error) {
 	var entries []jsonEntry
@@ -316,7 +309,6 @@ func changesetToJSON(reader *changeset.Reader) ([]byte, error) {
 				}
 				je.Changes = append(je.Changes, jsonChange{
 					Column: i,
-					Name:   columnName(entry.Table, i),
 					New:    valueToJSON(v),
 				})
 			}
@@ -327,7 +319,6 @@ func changesetToJSON(reader *changeset.Reader) ([]byte, error) {
 				}
 				je.Changes = append(je.Changes, jsonChange{
 					Column: i,
-					Name:   columnName(entry.Table, i),
 					Old:    valueToJSON(v),
 				})
 			}
@@ -340,7 +331,6 @@ func changesetToJSON(reader *changeset.Reader) ([]byte, error) {
 				}
 				ch := jsonChange{
 					Column: i,
-					Name:   columnName(entry.Table, i),
 					New:    valueToJSON(newV),
 				}
 				if oldV.Type() != changeset.TypeUndefined {
@@ -726,7 +716,7 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 		for _, col := range tbl.Columns {
 			cj := columnJSON{
 				Name:          col.Name,
-				Type:          baseTypeToString(col.Type.BaseType),
+				Type:          schema.BaseTypeString(col.Type.BaseType),
 				DBType:        col.Type.DBType,
 				IsPrimaryKey:  col.IsPrimaryKey,
 				IsNotNull:     col.IsNotNull,
@@ -771,30 +761,6 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 		return wrapError(ctx, "Failed to marshal schema JSON", err)
 	}
 	return FlushString(jsonfile, string(data))
-}
-
-// baseTypeToString converts a schema.BaseType to its string representation.
-func baseTypeToString(t schema.BaseType) string {
-	switch t {
-	case schema.BaseText:
-		return "text"
-	case schema.BaseInteger:
-		return "integer"
-	case schema.BaseDouble:
-		return "double"
-	case schema.BaseBoolean:
-		return "boolean"
-	case schema.BaseBlob:
-		return "blob"
-	case schema.BaseGeometry:
-		return "geometry"
-	case schema.BaseDate:
-		return "date"
-	case schema.BaseDatetime:
-		return "datetime"
-	default:
-		return "?"
-	}
 }
 
 // ---------------------------------------------------------------------------

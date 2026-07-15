@@ -659,9 +659,9 @@ func TestBaseTypeToString(t *testing.T) {
 		{BaseType(99), "?"},
 	}
 	for _, tt := range tests {
-		got := baseTypeToString(tt.bt)
+		got := BaseTypeString(tt.bt)
 		if got != tt.want {
-			t.Errorf("baseTypeToString(%d) = %q, want %q", tt.bt, got, tt.want)
+			t.Errorf("BaseTypeString(%d) = %q, want %q", tt.bt, got, tt.want)
 		}
 	}
 }
