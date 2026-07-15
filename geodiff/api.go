@@ -651,6 +651,58 @@ func DumpData(driverName, extraInfo, src, changesetPath string) error {
 	return nil
 }
 
+// CreateInitialDiff creates a changeset that, when applied to a new empty database,
+// produces the full state of src (schema + all data). This is the correct way to
+// produce an "initial sync" diff for first-time push.
+//
+// Unlike a simple DumpData, this handles GPKG metadata tables properly and
+// guarantees the resulting changeset can seed a fresh database from scratch.
+func CreateInitialDiff(src, changesetPath string) error {
+	ctx := NewContext()
+
+	if src == "" || changesetPath == "" {
+		return NewGeoDiffError("NULL arguments to createInitialDiff")
+	}
+
+	drv := newDriver(ctx, "sqlite")
+	if err := drv.Open(context.Background(), map[string]string{"base": src}); err != nil {
+		return wrapDriverError(ctx, "Cannot open source database", err)
+	}
+	defer drv.Close()
+
+	// Collect table schemas.
+	tableNames, err := drv.ListTables(context.Background(), false)
+	if err != nil {
+		return wrapDriverError(ctx, "Failed to list tables", err)
+	}
+
+	var schemas []*schema.TableSchema
+	for _, name := range tableNames {
+		tbl, err := drv.TableSchema(context.Background(), name, false)
+		if err != nil {
+			return wrapDriverError(ctx, "Failed to read schema: "+name, err)
+		}
+		schemas = append(schemas, tbl)
+	}
+
+	// Create an empty database with matching schema (including GPKG metadata).
+	emptyDrv := driver.NewSqliteDriver()
+	emptyPath := changesetPath + ".empty.gpkg"
+	defer os.Remove(emptyPath)
+
+	if err := emptyDrv.Create(context.Background(), map[string]string{"base": emptyPath}, true); err != nil {
+		return wrapError(ctx, "Failed to create empty database", err)
+	}
+	if err := emptyDrv.CreateTables(context.Background(), schemas); err != nil {
+		emptyDrv.Close()
+		return wrapError(ctx, "Failed to create schema in empty database", err)
+	}
+	emptyDrv.Close()
+
+	// Diff empty → canonical (this produces INSERTs for all existing rows).
+	return createChangesetEx(ctx, "sqlite", nil, emptyPath, src, changesetPath)
+}
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------

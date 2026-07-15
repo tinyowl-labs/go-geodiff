@@ -26,6 +26,9 @@ count, err := geodiff.ChangesCount("changes.diff")
 
 // Invert a changeset
 err = geodiff.InvertChangeset("changes.diff", "changes_inv.diff")
+
+// Create a full initial diff for first-time sync (schema + all data)
+err = geodiff.CreateInitialDiff("canonical.gpkg", "initial.diff")
 ```
 
 ## Relationship to upstream
@@ -38,7 +41,7 @@ Binary changeset files produced by go-geodiff are **byte-identical** to those pr
 
 | Package | Purpose |
 |---------|---------|
-| `geodiff` | Public API — `CreateChangeset`, `ApplyChangeset`, `Rebase`, `InvertChangeset`, `ListChanges`, `MakeCopy`, `Schema`, `DumpData`, WKB header stripping |
+| `geodiff` | Public API — `CreateChangeset`, `ApplyChangeset`, `Rebase`, `CreateInitialDiff`, `InvertChangeset`, `ListChanges`, `MakeCopy`, `Schema`, `DumpData`, WKB header stripping |
 | `driver` | `SqliteDriver` — ATTACH-based SQL diffing. `Rebase` — 3-way merge engine |
 | `changeset` | Binary changeset format — reader, writer, types, invert, concat, JSON export |
 | `schema` | `TableSchema`, `TableColumnInfo`, `CrsDefinition` — database introspection |
@@ -75,19 +78,20 @@ Pure Go, zero CGo. Benchmarked on Intel i7-12700KF (20 threads):
 
 | Operation | ns/op | allocs |
 |-----------|------:|-------:|
-| `CreateChangeset` (identical, 1 table) | 869,000 | 601 |
-| `Schema` export | 486,000 | 283 |
-| `DumpData` | 493,000 | 317 |
-| `MakeCopy` (SQLite backup) | 1,517,000 | 961 |
+| `CreateChangeset` (identical, 1 table) | 876,000 | 601 |
+| `Schema` export | 493,000 | 283 |
+| `DumpData` | 503,000 | 317 |
+| `MakeCopy` (SQLite backup) | 1,525,000 | 961 |
+| `Rebase` (no conflict, 1 table) | 1,023,000 | 623 |
 
 ### Changeset format
 
 | Operation | ns/op | allocs |
 |-----------|------:|-------:|
-| `Reader` — 10,000 INSERTs | 836,000 | 30,002 |
-| `Writer` — 1,000 INSERTs | 1,475,000 | 10 |
-| `Concat` — 500 + 500 entries | 1,084,000 | 6,838 |
-| `Varint` encode | 22 | 0 |
+| `Reader` — 10,000 INSERTs | 870,000 | 30,002 |
+| `Writer` — 1,000 INSERTs | 1,460,000 | 10 |
+| `Concat` — 500 + 500 entries | 1,097,000 | 6,838 |
+| `Varint` encode | 23 | 0 |
 | `Varint` decode | 17 | 0 |
 
 ### Go vs C++

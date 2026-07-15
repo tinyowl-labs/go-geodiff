@@ -74,6 +74,9 @@ func readTestDB(t *testing.T, path string) []dbRow {
 		}
 		out = append(out, r)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration error: %v", err)
+	}
 	return out
 }
 

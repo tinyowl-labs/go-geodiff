@@ -268,6 +268,10 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useMod
 	}
 	rows.Close()
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error for table %s: %w", tableName, err)
+	}
+
 	// Check if gpkg_geometry_columns table is present
 	hasGeomCols, _ := d.tableExists("gpkg_geometry_columns", dbName)
 	if hasGeomCols {
@@ -301,6 +305,9 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useMod
 				tbl.Columns[idx].SetGeometry(geomTypeName, srsId, hasM != 0, hasZ != 0)
 			}
 			geomRows.Close()
+			if err := geomRows.Err(); err != nil {
+				return nil, fmt.Errorf("geomRows iteration error for table %s: %w", tableName, err)
+			}
 		}
 
 		if srsId != -1 {
