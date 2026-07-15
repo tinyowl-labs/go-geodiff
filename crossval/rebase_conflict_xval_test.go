@@ -140,36 +140,29 @@ func TestRebaseCrossVal_InsertCollision(t *testing.T) {
 		t.Fatalf("Go CreateRebasedChangeset: %v", err)
 	}
 
-	// Compare rebased changesets — known divergence for conflict cases (see above).
+	// Compare rebased changesets — should be identical for insert collision
+	// (Go now remaps FIDs silently, matching C++ behavior).
 	aData, bData := readFile(t, cppRebased), readFile(t, goRebased)
 	if len(aData) > 0 && len(bData) > 0 {
-		t.Logf("Rebased sizes: C++=%d, Go=%d (divergence expected for conflict cases)", len(aData), len(bData))
-	}
-
-	// C++ rebase-diff handles insert collisions via fid remapping rather than
-	// writing a conflict file. Known behavioral difference.
-	cppConflictData, _ := os.ReadFile(cppConflicts)
-	goConflictData := readFile(t, goConflicts)
-
-	if len(cppConflictData) == 0 {
-		// C++ rebase-diff handles insert collisions via fid remapping, not
-		// conflict output. Go reports it as a conflict — behavioral difference.
-		t.Log("C++ produced no conflict file for insert collision (uses fid remapping)")
-		// Still verify Go's conflict output is well-formed.
-		if len(goConflictData) > 0 {
-			var j interface{}
-			if err := json.Unmarshal(goConflictData, &j); err != nil {
-				t.Errorf("Go conflict JSON invalid: %v", err)
-			}
+		if len(aData) != len(bData) {
+			t.Errorf("Rebased sizes: C++=%d, Go=%d", len(aData), len(bData))
+		} else if string(aData) != string(bData) {
+			t.Errorf("Rebased content diverges despite same size")
 		}
-		return
 	}
-	if len(goConflictData) == 0 {
-		t.Error("Go produced no conflict file for insert collision")
-	}
-	if !jsonEqual(t, cppConflictData, goConflictData) {
-		t.Errorf("Insert-collision conflict output diverges.\nC++:\n%s\nGo:\n%s",
-			string(cppConflictData), string(goConflictData))
+
+	// C++ handles insert collisions via fid remapping (silent).
+	// Go now does the same — no conflict file is expected for insert-only collisions.
+	cppConflictData, _ := os.ReadFile(cppConflicts)
+	goConflictData, _ := os.ReadFile(goConflicts)
+
+	if len(cppConflictData) == 0 && len(goConflictData) == 0 {
+		t.Log("Both Go and C++ handle insert collision via fid remapping (no conflict file)")
+	} else {
+		if !jsonEqual(t, cppConflictData, goConflictData) {
+			t.Errorf("Insert-collision conflict output diverges.\nC++:\n%s\nGo:\n%s",
+				string(cppConflictData), string(goConflictData))
+		}
 	}
 }
 

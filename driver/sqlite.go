@@ -687,16 +687,26 @@ func (d *SqliteDriver) applyUpdate(tableName string, tbl *schema.TableSchema, en
 
 	for i, c := range tbl.Columns {
 		vOld := entry.OldValues[i]
-		if where.Len() > 0 {
-			where.WriteString(" AND ")
-		}
 		if c.IsPrimaryKey {
+			// PK columns are always required.
+			if where.Len() > 0 {
+				where.WriteString(" AND ")
+			}
 			fmt.Fprintf(&where, "%s = ?", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vOld))
+		} else if vOld.Type() == changeset.TypeUndefined {
+			// Skip undefined columns — they should not be part of the WHERE clause.
+			continue
 		} else if c.Type.BaseType == schema.BaseDatetime {
+			if where.Len() > 0 {
+				where.WriteString(" AND ")
+			}
 			fmt.Fprintf(&where, "STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', %s) IS STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', ?)", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vOld))
 		} else {
+			if where.Len() > 0 {
+				where.WriteString(" AND ")
+			}
 			fmt.Fprintf(&where, "%s IS ?", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vOld))
 		}
@@ -723,17 +733,27 @@ func (d *SqliteDriver) applyDelete(tableName string, tbl *schema.TableSchema, en
 
 	for i, c := range tbl.Columns {
 		vOld := entry.OldValues[i]
-		if where.Len() > 0 {
-			where.WriteString(" AND ")
-		}
 		if c.IsPrimaryKey {
+			if where.Len() > 0 {
+				where.WriteString(" AND ")
+			}
 			fmt.Fprintf(&where, "%s = ?", quoteIdent(c.Name))
+			args = append(args, convertValueToInterface(vOld))
+		} else if vOld.Type() == changeset.TypeUndefined {
+			continue
 		} else if c.Type.BaseType == schema.BaseDatetime {
+			if where.Len() > 0 {
+				where.WriteString(" AND ")
+			}
 			fmt.Fprintf(&where, "STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', %s) IS STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', ?)", quoteIdent(c.Name))
+			args = append(args, convertValueToInterface(vOld))
 		} else {
+			if where.Len() > 0 {
+				where.WriteString(" AND ")
+			}
 			fmt.Fprintf(&where, "%s IS ?", quoteIdent(c.Name))
+			args = append(args, convertValueToInterface(vOld))
 		}
-		args = append(args, convertValueToInterface(vOld))
 	}
 
 	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(tableName), where.String())

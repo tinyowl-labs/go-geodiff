@@ -476,10 +476,10 @@ func handleUpdate(
 				addConflictItem(&cf, i, entry.OldValues[i], patchedVal, entry.NewValues[i])
 			}
 		} else if !patchedVal.IsUndefined() {
-			// Theirs modified this column, ours didn't → propagate theirs change.
-			outEntry.OldValues[i] = entry.OldValues[i]
-			outEntry.NewValues[i] = patchedVal
-			entryHasChanges = true
+			// Theirs modified this column, ours didn't.
+			// Don't include in rebased output — theirs is already applied.
+			outEntry.OldValues[i] = changeset.NewValueUndefined()
+			outEntry.NewValues[i] = changeset.NewValueUndefined()
 		} else {
 			// Unchanged by theirs → pass through ours
 			outEntry.OldValues[i] = entry.OldValues[i]

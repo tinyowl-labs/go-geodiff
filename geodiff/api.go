@@ -855,18 +855,49 @@ func createRebasedChangesetEx(ctx *Context, driverName string, driverExtraInfo m
 		return NewGeoDiffError("NULL arguments to createRebasedChangesetEx")
 	}
 
-	conflicts, err := rebaseChangesets(ctx, base2their, rebased, base2modified)
+	// Delegate to driver.Rebase which has proper value-level rebasing.
+	// base2their = base→theirs (their changes)
+	// base2modified = base→ours (our changes)
+	// rebased = output (theirs→merged, our changes rebased on theirs)
+	driverConflicts, err := driver.Rebase(base2their, base2modified, rebased)
 	if err != nil {
 		return err
 	}
 
-	if len(conflicts) == 0 {
+	if len(driverConflicts) == 0 {
 		ctx.Logger().Debug("No conflicts present")
 	} else {
+		// Convert driver conflict format to geodiff conflict format.
+		conflicts := convertConflicts(driverConflicts)
 		data, _ := json.MarshalIndent(conflictsJSON{Geodiff: conflicts}, "", "  ")
 		_ = FlushString(conflictFile, string(data))
 	}
 	return nil
+}
+
+// convertConflicts converts driver.ConflictFeature to the geodiff conflictFeature format.
+func convertConflicts(driverConflicts []driver.ConflictFeature) []conflictFeature {
+	result := make([]conflictFeature, 0, len(driverConflicts))
+	for _, dcf := range driverConflicts {
+		if !dcf.IsValid() {
+			continue
+		}
+		cf := conflictFeature{
+			Table: dcf.TableName,
+			Type:  "conflict",
+			FID:   fmt.Sprintf("%d", dcf.PK),
+		}
+		for _, dci := range dcf.Items {
+			cf.Changes = append(cf.Changes, conflictItem{
+				Column: dci.Column,
+				Base:   valueToJSON(dci.Base),
+				Old:    valueToJSON(dci.Theirs),
+				New:    valueToJSON(dci.Ours),
+			})
+		}
+		result = append(result, cf)
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
@@ -941,7 +972,7 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 	}
 
 	// Situation 3: both sides have changes.
-	// 3A) Create theirs→final (rebased) changeset.
+	// Undo our changes → apply theirs → apply rebased.
 	theirs2final := root + "_theirs2final.bin"
 	defer os.Remove(theirs2final)
 
@@ -950,7 +981,7 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 		return NewGeoDiffError("Unable to perform createRebasedChangeset theirs2final: " + err.Error())
 	}
 
-	// 3A2) Invert base→modified to get modified→base.
+	// Undo our local changes: invert base→modified → modified→base.
 	modified2base := root + "_modified2base.bin"
 	defer os.Remove(modified2base)
 
@@ -958,7 +989,7 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 		return NewGeoDiffError("Unable to perform invertChangeset modified2base: " + err.Error())
 	}
 
-	// 3B) Concat: modified→base + base→their + their→final → modified→final.
+	// Concat: modified→base + base→their + their→final → modified→final.
 	modified2final := root + "_modified2final.bin"
 	defer os.Remove(modified2final)
 
@@ -966,7 +997,7 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 		return NewGeoDiffError("Unable to concat changesets: " + err.Error())
 	}
 
-	// 3C) Apply.
+	// Apply.
 	if err := applyChangesetEx(ctx, driverName, driverExtraInfo, modified, modified2final); err != nil {
 		return NewGeoDiffError("Unable to perform applyChangeset modified2final: " + err.Error())
 	}
@@ -995,172 +1026,6 @@ type conflictItem struct {
 
 type conflictsJSON struct {
 	Geodiff []conflictFeature `json:"geodiff"`
-}
-
-// rebaseChangesets performs three-way rebase of changesets.
-// theirs2base: changes from THEIRS to BASE (our changes, already inverted if needed).
-// output: path where rebased changeset is written.
-// base2theirs: changes from BASE to THEIRS (their changes).
-func rebaseChangesets(ctx *Context, base2theirs, output, their2base string) ([]conflictFeature, error) {
-	// Read their changes (base→theirs) indexed by table+pk.
-	theirChanges, err := readChangesetIndex(base2theirs)
-	if err != nil {
-		return nil, NewGeoDiffError("Failed to read base2theirs: " + err.Error())
-	}
-
-	// Read our changes (their→base, i.e. inverted base2modified).
-	ourChanges, err := readChangesetIndex(their2base)
-	if err != nil {
-		return nil, NewGeoDiffError("Failed to read their2base: " + err.Error())
-	}
-
-	// Open output writer.
-	writer, err := changeset.NewWriter(output)
-	if err != nil {
-		return nil, wrapError(ctx, "Failed to create rebased changeset", err)
-	}
-	defer writer.Close()
-
-	var conflicts []conflictFeature
-	writtenTables := make(map[string]bool)
-
-	// Process their changes: apply them to theirs, yielding theirs→merged.
-	for pk, theirEntries := range theirChanges {
-		for _, entry := range theirEntries {
-			tableName := entry.Table.Name
-
-			// Check for our changes on the same table+pk.
-			ourEntries := ourChanges[pk]
-			if len(ourEntries) == 0 {
-				// No conflict: just write their change (it applies cleanly).
-				if !writtenTables[tableName] {
-					if err := writer.BeginTable(entry.Table); err != nil {
-						return nil, wrapError(ctx, "Failed to write table header", err)
-					}
-					writtenTables[tableName] = true
-				}
-				if err := writer.WriteEntry(*entry); err != nil {
-					return nil, wrapError(ctx, "Failed to write rebased entry", err)
-				}
-				continue
-			}
-
-			// Both changed the same row → potential conflict.
-			// For now, we write theirs and flag a conflict.
-			cf := conflictFeature{
-				Table: tableName,
-				Type:  "conflict",
-				FID:   fmt.Sprintf("%d", extractPK(entry)),
-			}
-
-			// Collect conflicting columns.
-			for _, ourEntry := range ourEntries {
-				for i := range ourEntry.NewValues {
-					ourV := ourEntry.NewValues[i]
-					if ourV.Type() == changeset.TypeUndefined {
-						continue
-					}
-					var baseV, theirV changeset.Value
-					if i < len(entry.OldValues) {
-						baseV = entry.OldValues[i]
-					}
-					if i < len(entry.NewValues) {
-						theirV = entry.NewValues[i]
-					}
-					ci := conflictItem{
-						Column: i,
-						Base:   valueToJSON(baseV),
-						Old:    valueToJSON(theirV),
-						New:    valueToJSON(ourV),
-					}
-					cf.Changes = append(cf.Changes, ci)
-				}
-			}
-			if len(cf.Changes) > 0 {
-				conflicts = append(conflicts, cf)
-				// Don't write the conflicted entry to the changeset.
-				// The row stays at theirs value; caller resolves via conflict JSON.
-				continue
-			}
-
-			// No conflict — write the entry.
-			if !writtenTables[tableName] {
-				if err := writer.BeginTable(entry.Table); err != nil {
-					return nil, wrapError(ctx, "Failed to write table header", err)
-				}
-				writtenTables[tableName] = true
-			}
-			if err := writer.WriteEntry(*entry); err != nil {
-				return nil, wrapError(ctx, "Failed to write rebased entry", err)
-			}
-		}
-	}
-
-	return conflicts, nil
-}
-
-// changesetPK is a composite key: table name + primary key value.
-type changesetPK struct {
-	Table string
-	PK    int
-}
-
-// readChangesetIndex reads a changeset and indexes entries by table+pk.
-func readChangesetIndex(path string) (map[changesetPK][]*changeset.ChangesetEntry, error) {
-	reader, err := changeset.NewReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-
-	index := make(map[changesetPK][]*changeset.ChangesetEntry)
-	for {
-		entry, err := reader.NextEntry()
-		if err != nil {
-			return nil, err
-		}
-		if entry == nil {
-			break
-		}
-		pk := extractPK(entry)
-		key := changesetPK{Table: entry.Table.Name, PK: pk}
-		index[key] = append(index[key], entry)
-	}
-	return index, nil
-}
-
-// extractPK extracts a primary key value from a changeset entry.
-// It uses the first PK column value (old for DELETE/UPDATE, new for INSERT).
-func extractPK(entry *changeset.ChangesetEntry) int {
-	var vals []changeset.Value
-	if entry.Op == changeset.OpInsert {
-		vals = entry.NewValues
-	} else {
-		vals = entry.OldValues
-	}
-
-	// Find the first PK column.
-	for i, isPK := range entry.Table.PrimaryKeys {
-		if isPK && i < len(vals) {
-			v := vals[i]
-			switch v.Type() {
-			case changeset.TypeInt:
-				n, _ := v.AsInt()
-				return int(n)
-			case changeset.TypeText:
-				// Hash the string just like the C++ get_primary_key.
-				s, _ := v.AsText()
-				h := 0
-				for _, c := range []byte(s) {
-					h = 33*h + int(c)
-				}
-				return h
-			default:
-				return 0
-			}
-		}
-	}
-	return 0
 }
 
 // ---------------------------------------------------------------------------

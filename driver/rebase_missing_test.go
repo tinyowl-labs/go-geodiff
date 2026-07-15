@@ -90,13 +90,15 @@ func TestRebase_ConcurrentEditDifferentColumns(t *testing.T) {
 		t.Errorf("expected UPDATE, got %s", entry.Op)
 	}
 
-	// Column 1: should have "New Material" from theirs.
+	// Column 1 (theirs-only change): should NOT be in the rebased output.
+	// The rebased changeset (theirs→merged) contains only our changes.
+	// Theirs changes are applied separately (base→theirs).
 	col1New, _ := entry.NewValues[1].AsText()
-	if col1New != "New Material" {
-		t.Errorf("column 1: expected 'New Material', got %q", col1New)
+	if col1New != "" {
+		t.Errorf("column 1: expected undefined (theirs-only, skipped), got %q", col1New)
 	}
 
-	// Column 2: should have 20 from ours.
+	// Column 2 (our change): should be 20.
 	col2New, _ := entry.NewValues[2].AsInt()
 	if col2New != 20 {
 		t.Errorf("column 2: expected 20, got %d", col2New)
