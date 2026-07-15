@@ -3,6 +3,7 @@
 package driver
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -13,6 +14,13 @@ import (
 	"github.com/tinyowl-labs/go-geodiff/changeset"
 	"github.com/tinyowl-labs/go-geodiff/schema"
 )
+
+// quoteIdent returns a properly quoted SQLite identifier.
+// It wraps the identifier in double quotes and doubles any embedded double quotes.
+func quoteIdent(s string) string {
+	q := `"`
+	return q + strings.ReplaceAll(s, q, q+q) + q
+}
 
 // ChangeApplyResult mirrors the C++ ChangeApplyResult enum.
 type ChangeApplyResult int
@@ -26,14 +34,14 @@ const (
 
 // Driver is the interface for all geodiff backends.
 type Driver interface {
-	Open(conn map[string]string) error
-	Create(conn map[string]string, overwrite bool) error
-	ListTables(useModified bool) ([]string, error)
-	TableSchema(tableName string, useModified bool) (*schema.TableSchema, error)
-	CreateChangeset(writer *changeset.Writer) error
-	ApplyChangeset(reader *changeset.Reader) error
-	CreateTables(tables []*schema.TableSchema) error
-	DumpData(writer *changeset.Writer, useModified bool) error
+	Open(ctx context.Context, conn map[string]string) error
+	Create(ctx context.Context, conn map[string]string, overwrite bool) error
+	ListTables(ctx context.Context, useModified bool) ([]string, error)
+	TableSchema(ctx context.Context, tableName string, useModified bool) (*schema.TableSchema, error)
+	CreateChangeset(ctx context.Context, writer *changeset.Writer) error
+	ApplyChangeset(ctx context.Context, reader *changeset.Reader) error
+	CreateTables(ctx context.Context, tables []*schema.TableSchema) error
+	DumpData(ctx context.Context, writer *changeset.Writer, useModified bool) error
 	Close() error
 }
 
@@ -48,21 +56,22 @@ func NewSqliteDriver() *SqliteDriver {
 	return &SqliteDriver{}
 }
 
-func (d *SqliteDriver) databaseName(useModified bool) string {
+func (d *SqliteDriver) databaseName(useModified bool) (string, error) {
 	if d.hasModified {
 		if useModified {
-			return "main"
+			return "main", nil
 		}
-		return "aux"
+		return "aux", nil
 	}
 	if useModified {
-		panic("'modified' table not open")
+		return "", fmt.Errorf("'modified' database not open")
 	}
-	return "main"
+	return "main", nil
 }
 
 // Open opens a SQLite database and optionally attaches a second as "aux".
-func (d *SqliteDriver) Open(conn map[string]string) error {
+func (d *SqliteDriver) Open(ctx context.Context, conn map[string]string) error {
+	_ = ctx
 	base, ok := conn["base"]
 	if !ok {
 		return fmt.Errorf("missing 'base' file")
@@ -106,7 +115,8 @@ func (d *SqliteDriver) Open(conn map[string]string) error {
 }
 
 // Create creates a new SQLite database file.
-func (d *SqliteDriver) Create(conn map[string]string, overwrite bool) error {
+func (d *SqliteDriver) Create(ctx context.Context, conn map[string]string, overwrite bool) error {
+	_ = ctx
 	base, ok := conn["base"]
 	if !ok {
 		return fmt.Errorf("missing 'base' file")
@@ -139,8 +149,12 @@ func (d *SqliteDriver) Close() error {
 }
 
 // ListTables returns all user table names (excluding GPKG system tables).
-func (d *SqliteDriver) ListTables(useModified bool) ([]string, error) {
-	dbName := d.databaseName(useModified)
+func (d *SqliteDriver) ListTables(ctx context.Context, useModified bool) ([]string, error) {
+	_ = ctx
+	dbName, err := d.databaseName(useModified)
+	if err != nil {
+		return nil, err
+	}
 	query := fmt.Sprintf(`SELECT name FROM %s.sqlite_master
 		WHERE type='table' AND sql NOT LIKE 'CREATE VIRTUAL%%%%'
 		ORDER BY name`, dbName)
@@ -186,8 +200,12 @@ func (d *SqliteDriver) tableExists(tableName, dbName string) (bool, error) {
 }
 
 // TableSchema returns the table schema for the given table.
-func (d *SqliteDriver) TableSchema(tableName string, useModified bool) (*schema.TableSchema, error) {
-	dbName := d.databaseName(useModified)
+func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, useModified bool) (*schema.TableSchema, error) {
+	_ = ctx
+	dbName, err := d.databaseName(useModified)
+	if err != nil {
+		return nil, err
+	}
 
 	exists, err := d.tableExists(tableName, dbName)
 	if err != nil {
@@ -312,47 +330,51 @@ func (d *SqliteDriver) TableSchema(tableName string, useModified bool) (*schema.
 // --- Changeset creation ---
 
 func sqlFindInserted(tableName string, tbl *schema.TableSchema, reverse bool) string {
+	qTable := quoteIdent(tableName)
 	var exprPk strings.Builder
 	for _, c := range tbl.Columns {
 		if c.IsPrimaryKey {
 			if exprPk.Len() > 0 {
 				exprPk.WriteString(" AND ")
 			}
-			fmt.Fprintf(&exprPk, `"%s"."%s"."%s"="%s"."%s"."%s"`,
-				"main", tableName, c.Name, "aux", tableName, c.Name)
+			qCol := quoteIdent(c.Name)
+			fmt.Fprintf(&exprPk, "\"main\".%s.%s=\"aux\".%s.%s",
+				qTable, qCol, qTable, qCol)
 		}
 	}
 	fromDB, otherDB := "main", "aux"
 	if reverse {
 		fromDB, otherDB = otherDB, fromDB
 	}
-	return fmt.Sprintf(`SELECT * FROM "%s"."%s" WHERE NOT EXISTS (SELECT 1 FROM "%s"."%s" WHERE %s)`,
-		fromDB, tableName, otherDB, tableName, exprPk.String())
+	return fmt.Sprintf("SELECT * FROM \"%s\".%s WHERE NOT EXISTS (SELECT 1 FROM \"%s\".%s WHERE %s)",
+		fromDB, qTable, otherDB, qTable, exprPk.String())
 }
 
 func sqlFindModified(tableName string, tbl *schema.TableSchema) string {
+	qTable := quoteIdent(tableName)
 	var exprPk, exprOther strings.Builder
 	for _, c := range tbl.Columns {
+		qCol := quoteIdent(c.Name)
 		if c.IsPrimaryKey {
 			if exprPk.Len() > 0 {
 				exprPk.WriteString(" AND ")
 			}
-			fmt.Fprintf(&exprPk, `"%s"."%s"."%s"="%s"."%s"."%s"`,
-				"main", tableName, c.Name, "aux", tableName, c.Name)
+			fmt.Fprintf(&exprPk, "\"main\".%s.%s=\"aux\".%s.%s",
+				qTable, qCol, qTable, qCol)
 		} else {
 			if exprOther.Len() > 0 {
 				exprOther.WriteString(" OR ")
 			}
-			fmt.Fprintf(&exprOther, `"%s"."%s"."%s" IS NOT "%s"."%s"."%s"`,
-				"main", tableName, c.Name, "aux", tableName, c.Name)
+			fmt.Fprintf(&exprOther, "\"main\".%s.%s IS NOT \"aux\".%s.%s",
+				qTable, qCol, qTable, qCol)
 		}
 	}
 	if exprOther.Len() == 0 {
-		return fmt.Sprintf(`SELECT * FROM "%s"."%s", "%s"."%s" WHERE %s`,
-			"main", tableName, "aux", tableName, exprPk.String())
+		return fmt.Sprintf("SELECT * FROM \"main\".%s, \"aux\".%s WHERE %s",
+			qTable, qTable, exprPk.String())
 	}
-	return fmt.Sprintf(`SELECT * FROM "%s"."%s", "%s"."%s" WHERE %s AND (%s)`,
-		"main", tableName, "aux", tableName, exprPk.String(), exprOther.String())
+	return fmt.Sprintf("SELECT * FROM \"main\".%s, \"aux\".%s WHERE %s AND (%s)",
+		qTable, qTable, exprPk.String(), exprOther.String())
 }
 
 func changesetValue(val interface{}) changeset.Value {
@@ -450,14 +472,14 @@ func checkDatetimeDiff(db *sql.DB, v1, v2 changeset.Value) bool {
 	if v1.Type() == changeset.TypeNull {
 		s1 = nil
 	} else if v1.Type() == changeset.TypeText {
-		s1 = v1.AsText()
+		s1, _ = v1.AsText()
 	} else {
 		return true
 	}
 	if v2.Type() == changeset.TypeNull {
 		s2 = nil
 	} else if v2.Type() == changeset.TypeText {
-		s2 = v2.AsText()
+		s2, _ = v2.AsText()
 	} else {
 		return true
 	}
@@ -533,15 +555,16 @@ func handleUpdated(db *sql.DB, tableName string, tbl *schema.TableSchema,
 }
 
 // CreateChangeset writes all changes between base and modified databases.
-func (d *SqliteDriver) CreateChangeset(writer *changeset.Writer) error {
+func (d *SqliteDriver) CreateChangeset(ctx context.Context, writer *changeset.Writer) error {
+	_ = ctx
 	if !d.hasModified {
 		return fmt.Errorf("cannot create changeset without modified database")
 	}
-	tablesBase, err := d.ListTables(false)
+	tablesBase, err := d.ListTables(ctx, false)
 	if err != nil {
 		return fmt.Errorf("failed to list base tables: %w", err)
 	}
-	tablesModified, err := d.ListTables(true)
+	tablesModified, err := d.ListTables(ctx, true)
 	if err != nil {
 		return fmt.Errorf("failed to list modified tables: %w", err)
 	}
@@ -550,11 +573,11 @@ func (d *SqliteDriver) CreateChangeset(writer *changeset.Writer) error {
 			strings.Join(tablesBase, ", "), strings.Join(tablesModified, ", "))
 	}
 	for _, tableName := range tablesBase {
-		tbl, err := d.TableSchema(tableName, false)
+		tbl, err := d.TableSchema(ctx, tableName, false)
 		if err != nil {
 			return err
 		}
-		tblNew, err := d.TableSchema(tableName, true)
+		tblNew, err := d.TableSchema(ctx, tableName, true)
 		if err != nil {
 			return err
 		}
@@ -600,12 +623,12 @@ func (d *SqliteDriver) applyInsert(tableName string, tbl *schema.TableSchema, en
 			cols.WriteString(", ")
 			placeholders.WriteString(", ")
 		}
-		fmt.Fprintf(&cols, `"%s"`, c.Name)
+		cols.WriteString(quoteIdent(c.Name))
 		placeholders.WriteString("?")
 		args = append(args, convertValueToInterface(entry.NewValues[i]))
 	}
 
-	sqlStr := fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s)`, tableName, cols.String(), placeholders.String())
+	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quoteIdent(tableName), cols.String(), placeholders.String())
 	result, err := d.db.Exec(sqlStr, args...)
 	if err != nil {
 		if isConstraintError(err) {
@@ -630,7 +653,7 @@ func (d *SqliteDriver) applyUpdate(tableName string, tbl *schema.TableSchema, en
 			if sets.Len() > 0 {
 				sets.WriteString(", ")
 			}
-			fmt.Fprintf(&sets, `"%s" = ?`, c.Name)
+			fmt.Fprintf(&sets, "%s = ?", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vNew))
 		}
 	}
@@ -645,18 +668,18 @@ func (d *SqliteDriver) applyUpdate(tableName string, tbl *schema.TableSchema, en
 			where.WriteString(" AND ")
 		}
 		if c.IsPrimaryKey {
-			fmt.Fprintf(&where, `"%s" = ?`, c.Name)
+			fmt.Fprintf(&where, "%s = ?", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vOld))
 		} else if c.Type.BaseType == schema.BaseDatetime {
-			fmt.Fprintf(&where, `STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', "%s") IS STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', ?)`, c.Name)
+			fmt.Fprintf(&where, "STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', %s) IS STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', ?)", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vOld))
 		} else {
-			fmt.Fprintf(&where, `"%s" IS ?`, c.Name)
+			fmt.Fprintf(&where, "%s IS ?", quoteIdent(c.Name))
 			args = append(args, convertValueToInterface(vOld))
 		}
 	}
 
-	sqlStr := fmt.Sprintf(`UPDATE "%s" SET %s WHERE %s`, tableName, sets.String(), where.String())
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", quoteIdent(tableName), sets.String(), where.String())
 	result, err := d.db.Exec(sqlStr, args...)
 	if err != nil {
 		if isConstraintError(err) {
@@ -681,16 +704,16 @@ func (d *SqliteDriver) applyDelete(tableName string, tbl *schema.TableSchema, en
 			where.WriteString(" AND ")
 		}
 		if c.IsPrimaryKey {
-			fmt.Fprintf(&where, `"%s" = ?`, c.Name)
+			fmt.Fprintf(&where, "%s = ?", quoteIdent(c.Name))
 		} else if c.Type.BaseType == schema.BaseDatetime {
-			fmt.Fprintf(&where, `STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', "%s") IS STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', ?)`, c.Name)
+			fmt.Fprintf(&where, "STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', %s) IS STRFTIME('%%Y-%%m-%%d %%H:%%M:%%f', ?)", quoteIdent(c.Name))
 		} else {
-			fmt.Fprintf(&where, `"%s" IS ?`, c.Name)
+			fmt.Fprintf(&where, "%s IS ?", quoteIdent(c.Name))
 		}
 		args = append(args, convertValueToInterface(vOld))
 	}
 
-	sqlStr := fmt.Sprintf(`DELETE FROM "%s" WHERE %s`, tableName, where.String())
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(tableName), where.String())
 	result, err := d.db.Exec(sqlStr, args...)
 	if err != nil {
 		if isConstraintError(err) {
@@ -705,7 +728,7 @@ func (d *SqliteDriver) applyDelete(tableName string, tbl *schema.TableSchema, en
 	return ApplyApplied, nil
 }
 
-func (d *SqliteDriver) applyChange(state map[string]*schema.TableSchema, entry *changeset.ChangesetEntry) (ChangeApplyResult, error) {
+func (d *SqliteDriver) applyChange(ctx context.Context, state map[string]*schema.TableSchema, entry *changeset.ChangesetEntry) (ChangeApplyResult, error) {
 	tableName := entry.Table.Name
 
 	if strings.HasPrefix(tableName, "gpkg_") {
@@ -714,7 +737,7 @@ func (d *SqliteDriver) applyChange(state map[string]*schema.TableSchema, entry *
 
 	tbl, ok := state[tableName]
 	if !ok {
-		schemaTbl, err := d.TableSchema(tableName, false)
+		schemaTbl, err := d.TableSchema(ctx, tableName, false)
 		if err != nil {
 			return ApplyNoChange, err
 		}
@@ -752,13 +775,17 @@ func convertValueToInterface(v changeset.Value) interface{} {
 	case changeset.TypeNull:
 		return nil
 	case changeset.TypeInt:
-		return v.AsInt()
+		n, _ := v.AsInt()
+		return n
 	case changeset.TypeDouble:
-		return v.AsDouble()
+		f, _ := v.AsDouble()
+		return f
 	case changeset.TypeText:
-		return v.AsText()
+		s, _ := v.AsText()
+		return s
 	case changeset.TypeBlob:
-		return v.AsBlob()
+		b, _ := v.AsBlob()
+		return b
 	default:
 		return nil
 	}
@@ -794,7 +821,8 @@ func cloneEntry(e *changeset.ChangesetEntry) changeset.ChangesetEntry {
 }
 
 // ApplyChangeset reads a changeset and applies it to the database.
-func (d *SqliteDriver) ApplyChangeset(reader *changeset.Reader) error {
+func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Reader) error {
+	_ = ctx
 	if _, err := d.db.Exec("SAVEPOINT changeset_apply"); err != nil {
 		return fmt.Errorf("unable to start savepoint transaction: %w", err)
 	}
@@ -834,7 +862,7 @@ func (d *SqliteDriver) ApplyChangeset(reader *changeset.Reader) error {
 			break // EOF
 		}
 
-		res, err := d.applyChange(state, entry)
+		res, err := d.applyChange(ctx, state, entry)
 		if err != nil {
 			createTriggers(d.db, triggerCmds)
 			return err
@@ -846,7 +874,7 @@ func (d *SqliteDriver) ApplyChangeset(reader *changeset.Reader) error {
 				tableCopies[entry.Table.Name] = entry.Table.Clone()
 			}
 			cloned := cloneEntry(entry)
-			cloned.Table = tableCopies[entry.Table.Name]
+			cloned.Table = *tableCopies[entry.Table.Name]
 			conflictingEntries = append(conflictingEntries, cloned)
 		case ApplyNoChange:
 			unrecoverableConflicts++
@@ -857,7 +885,7 @@ func (d *SqliteDriver) ApplyChangeset(reader *changeset.Reader) error {
 	var newConflicting []changeset.ChangesetEntry
 	for len(conflictingEntries) > 0 {
 		for _, centry := range conflictingEntries {
-			res, err := d.applyChange(state, &centry)
+			res, err := d.applyChange(ctx, state, &centry)
 			if err != nil {
 				createTriggers(d.db, triggerCmds)
 				return err
@@ -968,7 +996,8 @@ func (d *SqliteDriver) initSpatialMetadata() error {
 }
 
 // CreateTables creates empty tables from schemas.
-func (d *SqliteDriver) CreateTables(tables []*schema.TableSchema) error {
+func (d *SqliteDriver) CreateTables(ctx context.Context, tables []*schema.TableSchema) error {
+	_ = ctx
 	if err := d.initSpatialMetadata(); err != nil {
 		return err
 	}
@@ -991,7 +1020,7 @@ func (d *SqliteDriver) CreateTables(tables []*schema.TableSchema) error {
 			if columns.Len() > 0 {
 				columns.WriteString(", ")
 			}
-			fmt.Fprintf(&columns, `"%s" %s`, c.Name, c.Type.DBType)
+			fmt.Fprintf(&columns, "%s %s", quoteIdent(c.Name), c.Type.DBType)
 			if c.IsNotNull {
 				columns.WriteString(" NOT NULL")
 			}
@@ -999,11 +1028,11 @@ func (d *SqliteDriver) CreateTables(tables []*schema.TableSchema) error {
 				if pkeys.Len() > 0 {
 					pkeys.WriteString(", ")
 				}
-				fmt.Fprintf(&pkeys, `"%s"`, c.Name)
+				pkeys.WriteString(quoteIdent(c.Name))
 			}
 		}
 
-		sqlStr := fmt.Sprintf(`CREATE TABLE "main"."%s" (`, tbl.Name)
+		sqlStr := fmt.Sprintf("CREATE TABLE \"main\".%s (", quoteIdent(tbl.Name))
 		if columns.Len() > 0 {
 			sqlStr += columns.String()
 		}
@@ -1066,14 +1095,18 @@ func addGpkgSpatialTable(db *sql.DB, tbl *schema.TableSchema) error {
 }
 
 // DumpData writes all rows from a database as INSERT operations.
-func (d *SqliteDriver) DumpData(writer *changeset.Writer, useModified bool) error {
-	dbName := d.databaseName(useModified)
-	tables, err := d.ListTables(useModified)
+func (d *SqliteDriver) DumpData(ctx context.Context, writer *changeset.Writer, useModified bool) error {
+	_ = ctx
+	dbName, err := d.databaseName(useModified)
+	if err != nil {
+		return err
+	}
+	tables, err := d.ListTables(ctx, useModified)
 	if err != nil {
 		return err
 	}
 	for _, tableName := range tables {
-		tbl, err := d.TableSchema(tableName, useModified)
+		tbl, err := d.TableSchema(ctx, tableName, useModified)
 		if err != nil {
 			return err
 		}
@@ -1081,7 +1114,7 @@ func (d *SqliteDriver) DumpData(writer *changeset.Writer, useModified bool) erro
 			continue
 		}
 		first := true
-		query := fmt.Sprintf(`SELECT * FROM "%s"."%s"`, dbName, tableName)
+		query := fmt.Sprintf("SELECT * FROM \"%s\".%s", dbName, quoteIdent(tableName))
 		rows, err := d.db.Query(query)
 		if err != nil {
 			return fmt.Errorf("failure dumping changeset: %w", err)

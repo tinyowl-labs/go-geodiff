@@ -8,6 +8,7 @@ Go port of geodiffrebase.cpp — the 3-way merge/rebase engine.
 package driver
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -94,44 +95,49 @@ func (m *rebaseMapping) hasOldPkey(table string, pk int) bool {
 	return exists
 }
 
-func (m *rebaseMapping) getNewPkey(table string, pk int) int {
+func (m *rebaseMapping) getNewPkey(table string, pk int) (int, error) {
 	ids, ok := m.mapIds[table]
 	if !ok {
-		panic("internal error: getNewPkey for unknown table " + table)
+		return 0, fmt.Errorf("internal error: getNewPkey for unknown table %s", table)
 	}
 	newPK, ok := ids[pk]
 	if !ok {
-		panic(fmt.Sprintf("internal error: getNewPkey for pk %d in table %s", pk, table))
+		return 0, fmt.Errorf("internal error: getNewPkey for pk %d in table %s", pk, table)
 	}
-	return newPK
+	return newPK, nil
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+// errNoPrimaryKey is returned when a changeset entry lacks a primary key column.
+var errNoPrimaryKey = fmt.Errorf("entry has no primary key column")
+
 // getPrimaryKey extracts the primary key value from a changeset entry.
 // For INSERT, it reads from newValues; for DELETE/UPDATE, from oldValues.
-func getPrimaryKey(entry *changeset.ChangesetEntry) int {
+func getPrimaryKey(entry *changeset.ChangesetEntry) (int, error) {
 	for i, isPK := range entry.Table.PrimaryKeys {
 		if isPK {
 			if entry.Op == changeset.OpInsert {
-				return int(entry.NewValues[i].AsInt())
+				n, _ := entry.NewValues[i].AsInt()
+				return int(n), nil
 			}
-			return int(entry.OldValues[i].AsInt())
+			n, _ := entry.OldValues[i].AsInt()
+			return int(n), nil
 		}
 	}
-	panic("getPrimaryKey: entry has no primary key column")
+	return 0, errNoPrimaryKey
 }
 
 // primaryKeyColumn returns the index of the first primary key column.
-func primaryKeyColumn(entry *changeset.ChangesetEntry) int {
+func primaryKeyColumn(entry *changeset.ChangesetEntry) (int, error) {
 	for i, isPK := range entry.Table.PrimaryKeys {
 		if isPK {
-			return i
+			return i, nil
 		}
 	}
-	panic("primaryKeyColumn: entry has no primary key column")
+	return -1, errNoPrimaryKey
 }
 
 // fileBytesEmpty returns true if the file does not exist or is empty.
@@ -177,7 +183,10 @@ func parseOldChangeset(reader *changeset.Reader, dbInfo *databaseRebaseInfo) err
 			dbInfo.tables[tableName] = tableInfo
 		}
 
-		pk := getPrimaryKey(entry)
+		pk, err := getPrimaryKey(entry)
+		if err != nil {
+			return fmt.Errorf("parseOldChangeset: %w", err)
+		}
 
 		switch entry.Op {
 		case changeset.OpInsert:
@@ -232,12 +241,15 @@ func findMappingForNewChangeset(
 
 		switch entry.Op {
 		case changeset.OpInsert:
-			pk := getPrimaryKey(entry)
+			pk, err := getPrimaryKey(entry)
+			if err != nil {
+				return fmt.Errorf("findMappingForNewChangeset: %w", err)
+			}
 			if tableInfo.inserted[pk] {
 				// Both theirs and ours inserted the same PK → conflict
 				freeIdx, exists := freeIndices[tableName]
 				if !exists {
-					panic("internal error: freeIndices missing for " + tableName)
+					return fmt.Errorf("internal error: freeIndices missing for %s", tableName)
 				}
 				mapping.addPkeyMapping(tableName, pk, freeIdx)
 				freeIndices[tableName] = freeIdx + 1
@@ -252,14 +264,20 @@ func findMappingForNewChangeset(
 			}
 
 		case changeset.OpUpdate:
-			pk := getPrimaryKey(entry)
+			pk, err := getPrimaryKey(entry)
+			if err != nil {
+				return fmt.Errorf("findMappingForNewChangeset: %w", err)
+			}
 			if tableInfo.deleted[pk] {
 				// Update on deleted feature
 				mapping.addPkeyMapping(tableName, pk, invalidFID)
 			}
 
 		case changeset.OpDelete:
-			pk := getPrimaryKey(entry)
+			pk, err := getPrimaryKey(entry)
+			if err != nil {
+				return fmt.Errorf("findMappingForNewChangeset: %w", err)
+			}
 			if tableInfo.deleted[pk] {
 				// Delete of deleted feature
 				mapping.addPkeyMapping(tableName, pk, invalidFID)
@@ -284,7 +302,7 @@ func findMappingForNewChangeset(
 				// Our mapping has introduced a conflict in IDs → remap this old PK too
 				freeIdx, exists := freeIndices[tableName]
 				if !exists {
-					panic("internal error: freeIndices missing (2) for " + tableName)
+					return fmt.Errorf("internal error: freeIndices missing (2) for %s", tableName)
 				}
 				mapping.addPkeyMapping(tableName, pk, freeIdx)
 				usedNewPKs[freeIdx] = true
@@ -304,16 +322,23 @@ func handleInsert(
 	entry *changeset.ChangesetEntry,
 	mapping *rebaseMapping,
 	outEntry *changeset.ChangesetEntry,
-) bool {
+) (bool, error) {
 	numColumns := entry.Table.ColumnCount()
 	outEntry.Op = changeset.OpInsert
 	outEntry.NewValues = make([]changeset.Value, numColumns)
 
-	pk := getPrimaryKey(entry)
+	pk, err := getPrimaryKey(entry)
+	if err != nil {
+		return false, err
+	}
 	newPK := pk
 
 	if mapping.hasOldPkey(entry.Table.Name, pk) {
-		newPK = mapping.getNewPkey(entry.Table.Name, pk)
+		var mapErr error
+		newPK, mapErr = mapping.getNewPkey(entry.Table.Name, pk)
+		if mapErr != nil {
+			return false, mapErr
+		}
 	}
 
 	for i := 0; i < numColumns; i++ {
@@ -323,7 +348,7 @@ func handleInsert(
 			outEntry.NewValues[i] = entry.NewValues[i]
 		}
 	}
-	return true
+	return true, nil
 }
 
 func handleDelete(
@@ -331,19 +356,26 @@ func handleDelete(
 	mapping *rebaseMapping,
 	tableInfo *tableRebaseInfo,
 	outEntry *changeset.ChangesetEntry,
-) bool {
+) (bool, error) {
 	numColumns := entry.Table.ColumnCount()
 	outEntry.Op = changeset.OpDelete
 	outEntry.OldValues = make([]changeset.Value, numColumns)
 
-	pk := getPrimaryKey(entry)
+	pk, err := getPrimaryKey(entry)
+	if err != nil {
+		return false, err
+	}
 	newPK := pk
 
 	if mapping.hasOldPkey(entry.Table.Name, pk) {
-		newPK = mapping.getNewPkey(entry.Table.Name, pk)
+		var mapErr error
+		newPK, mapErr = mapping.getNewPkey(entry.Table.Name, pk)
+		if mapErr != nil {
+			return false, mapErr
+		}
 		// Both deleted: skip
 		if newPK == invalidFID {
-			return false
+			return false, nil
 		}
 	}
 
@@ -365,7 +397,7 @@ func handleDelete(
 			}
 		}
 	}
-	return true
+	return true, nil
 }
 
 func addConflictItem(cf *ConflictFeature, col int, base, theirs, ours changeset.Value) {
@@ -387,17 +419,23 @@ func handleUpdate(
 	tableInfo *tableRebaseInfo,
 	outEntry *changeset.ChangesetEntry,
 	conflicts *[]ConflictFeature,
-) bool {
+) (bool, error) {
 	numColumns := entry.Table.ColumnCount()
 	outEntry.Op = changeset.OpUpdate
 	outEntry.OldValues = make([]changeset.Value, numColumns)
 	outEntry.NewValues = make([]changeset.Value, numColumns)
 
-	pk := getPrimaryKey(entry)
+	pk, err := getPrimaryKey(entry)
+	if err != nil {
+		return false, err
+	}
 
 	// Check if this update conflicts with a theirs delete
 	if mapping.hasOldPkey(entry.Table.Name, pk) {
-		newPK := mapping.getNewPkey(entry.Table.Name, pk)
+		newPK, mapErr := mapping.getNewPkey(entry.Table.Name, pk)
+		if mapErr != nil {
+			return false, mapErr
+		}
 		if newPK == invalidFID {
 			// Our UPDATE conflicts with their DELETE: delete wins, record conflict
 			cf := ConflictFeature{PK: pk, TableName: entry.Table.Name}
@@ -409,7 +447,7 @@ func handleUpdate(
 			if cf.IsValid() {
 				*conflicts = append(*conflicts, cf)
 			}
-			return false
+			return false, nil
 		}
 	}
 
@@ -450,7 +488,7 @@ func handleUpdate(
 		*conflicts = append(*conflicts, cf)
 	}
 
-	return entryHasChanges
+	return entryHasChanges, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +523,7 @@ func prepareNewChangeset(
 		tableName := entry.Table.Name
 
 		if _, exists := tableDefinitions[tableName]; !exists {
-			t := *entry.Table // copy
+			t := entry.Table // copy
 			tableDefinitions[tableName] = &t
 			tableOrder = append(tableOrder, tableName)
 		}
@@ -502,11 +540,23 @@ func prepareNewChangeset(
 
 		switch entry.Op {
 		case changeset.OpUpdate:
-			writeEntry = handleUpdate(entry, mapping, tableIt, &outEntry, conflicts)
+			var handleErr error
+			writeEntry, handleErr = handleUpdate(entry, mapping, tableIt, &outEntry, conflicts)
+			if handleErr != nil {
+				return fmt.Errorf("prepareNewChangeset: handleUpdate: %w", handleErr)
+			}
 		case changeset.OpInsert:
-			writeEntry = handleInsert(entry, mapping, &outEntry)
+			var handleErr error
+			writeEntry, handleErr = handleInsert(entry, mapping, &outEntry)
+			if handleErr != nil {
+				return fmt.Errorf("prepareNewChangeset: handleInsert: %w", handleErr)
+			}
 		case changeset.OpDelete:
-			writeEntry = handleDelete(entry, mapping, tableIt, &outEntry)
+			var handleErr error
+			writeEntry, handleErr = handleDelete(entry, mapping, tableIt, &outEntry)
+			if handleErr != nil {
+				return fmt.Errorf("prepareNewChangeset: handleDelete: %w", handleErr)
+			}
 		}
 
 		if writeEntry {
@@ -643,10 +693,10 @@ func InvertChangeset(inputPath, outputPath string) error {
 		}
 
 		if currentTable == nil || currentTable.Name != entry.Table.Name {
-			if err := writer.BeginTable(*entry.Table); err != nil {
+			if err := writer.BeginTable(entry.Table); err != nil {
 				return fmt.Errorf("InvertChangeset: beginTable: %w", err)
 			}
-			currentTable = entry.Table
+			currentTable = &entry.Table
 		}
 
 		numColumns := entry.Table.ColumnCount()
@@ -728,7 +778,7 @@ func RebaseDirect(
 
 	// 1a. Create BASE→OURS changeset
 	d1 := NewSqliteDriver()
-	if err := d1.Open(map[string]string{"base": base, "modified": ours}); err != nil {
+	if err := d1.Open(context.Background(), map[string]string{"base": base, "modified": ours}); err != nil {
 		return fmt.Errorf("RebaseDirect: open base→ours: %w", err)
 	}
 	w1, err := changeset.NewWriter(baseOurs)
@@ -736,7 +786,7 @@ func RebaseDirect(
 		d1.Close()
 		return fmt.Errorf("RebaseDirect: create base2ours writer: %w", err)
 	}
-	if err := d1.CreateChangeset(w1); err != nil {
+	if err := d1.CreateChangeset(context.Background(), w1); err != nil {
 		w1.Close()
 		d1.Close()
 		return fmt.Errorf("RebaseDirect: createChangeset base→ours: %w", err)
@@ -759,11 +809,11 @@ func RebaseDirect(
 			return fmt.Errorf("RebaseDirect: open inverted changeset: %w", err)
 		}
 		dApply := NewSqliteDriver()
-		if err := dApply.Open(map[string]string{"base": ours}); err != nil {
+		if err := dApply.Open(context.Background(), map[string]string{"base": ours}); err != nil {
 			rInv.Close()
 			return fmt.Errorf("RebaseDirect: open ours for undo: %w", err)
 		}
-		if err := dApply.ApplyChangeset(rInv); err != nil {
+		if err := dApply.ApplyChangeset(context.Background(), rInv); err != nil {
 			rInv.Close()
 			dApply.Close()
 			return fmt.Errorf("RebaseDirect: apply undo changeset: %w", err)
@@ -776,7 +826,7 @@ func RebaseDirect(
 
 	// 2a. Create BASE→THEIRS changeset
 	d2 := NewSqliteDriver()
-	if err := d2.Open(map[string]string{"base": base, "modified": theirs}); err != nil {
+	if err := d2.Open(context.Background(), map[string]string{"base": base, "modified": theirs}); err != nil {
 		return fmt.Errorf("RebaseDirect: open base→theirs: %w", err)
 	}
 	w2, err := changeset.NewWriter(baseTheirs)
@@ -784,7 +834,7 @@ func RebaseDirect(
 		d2.Close()
 		return fmt.Errorf("RebaseDirect: create base2theirs writer: %w", err)
 	}
-	if err := d2.CreateChangeset(w2); err != nil {
+	if err := d2.CreateChangeset(context.Background(), w2); err != nil {
 		w2.Close()
 		d2.Close()
 		return fmt.Errorf("RebaseDirect: createChangeset base→theirs: %w", err)
@@ -801,11 +851,11 @@ func RebaseDirect(
 			return fmt.Errorf("RebaseDirect: open theirs changeset: %w", err)
 		}
 		dApply2 := NewSqliteDriver()
-		if err := dApply2.Open(map[string]string{"base": ours}); err != nil {
+		if err := dApply2.Open(context.Background(), map[string]string{"base": ours}); err != nil {
 			rTheirs.Close()
 			return fmt.Errorf("RebaseDirect: open ours for theirs apply: %w", err)
 		}
-		if err := dApply2.ApplyChangeset(rTheirs); err != nil {
+		if err := dApply2.ApplyChangeset(context.Background(), rTheirs); err != nil {
 			rTheirs.Close()
 			dApply2.Close()
 			return fmt.Errorf("RebaseDirect: apply theirs changeset: %w", err)
@@ -830,11 +880,11 @@ func RebaseDirect(
 				return fmt.Errorf("RebaseDirect: open merged changeset: %w", err)
 			}
 			dApply3 := NewSqliteDriver()
-			if err := dApply3.Open(map[string]string{"base": ours}); err != nil {
+			if err := dApply3.Open(context.Background(), map[string]string{"base": ours}); err != nil {
 				rMerged.Close()
 				return fmt.Errorf("RebaseDirect: open ours for merged apply: %w", err)
 			}
-			if err := dApply3.ApplyChangeset(rMerged); err != nil {
+			if err := dApply3.ApplyChangeset(context.Background(), rMerged); err != nil {
 				rMerged.Close()
 				dApply3.Close()
 				return fmt.Errorf("RebaseDirect: apply merged changeset: %w", err)
@@ -885,15 +935,18 @@ func valueToJSON(v changeset.Value) interface{} {
 	case changeset.TypeUndefined:
 		return nil
 	case changeset.TypeInt:
-		return v.AsInt()
+		n, _ := v.AsInt()
+		return n
 	case changeset.TypeDouble:
-		return v.AsDouble()
+		f, _ := v.AsDouble()
+		return f
 	case changeset.TypeText:
-		return v.AsText()
+		s, _ := v.AsText()
+		return s
 	case changeset.TypeBlob:
 		// Base64-encode blob data
-		data := v.AsBlob()
-		return base64.StdEncoding.EncodeToString(data)
+		b, _ := v.AsBlob()
+		return base64.StdEncoding.EncodeToString(b)
 	case changeset.TypeNull:
 		return nil
 	default:

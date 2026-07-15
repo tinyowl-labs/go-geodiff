@@ -17,7 +17,7 @@ import (
 func makeInsertEntry(tableName string, pk int) changeset.ChangesetEntry {
 	return changeset.ChangesetEntry{
 		Op: changeset.OpInsert,
-		Table: &changeset.ChangesetTable{
+		Table: changeset.ChangesetTable{
 			Name:        tableName,
 			PrimaryKeys: []bool{true},
 		},
@@ -31,7 +31,7 @@ func makeInsertEntry(tableName string, pk int) changeset.ChangesetEntry {
 func makeInsertEntry2(tableName string, pk int, val string) changeset.ChangesetEntry {
 	return changeset.ChangesetEntry{
 		Op: changeset.OpInsert,
-		Table: &changeset.ChangesetTable{
+		Table: changeset.ChangesetTable{
 			Name:        tableName,
 			PrimaryKeys: []bool{true, false},
 		},
@@ -46,7 +46,7 @@ func makeInsertEntry2(tableName string, pk int, val string) changeset.ChangesetE
 func makeDeleteEntry(tableName string, pk int) changeset.ChangesetEntry {
 	return changeset.ChangesetEntry{
 		Op: changeset.OpDelete,
-		Table: &changeset.ChangesetTable{
+		Table: changeset.ChangesetTable{
 			Name:        tableName,
 			PrimaryKeys: []bool{true},
 		},
@@ -60,7 +60,7 @@ func makeDeleteEntry(tableName string, pk int) changeset.ChangesetEntry {
 func makeUpdateEntry2(tableName string, pk int, oldVal, newVal string) changeset.ChangesetEntry {
 	return changeset.ChangesetEntry{
 		Op: changeset.OpUpdate,
-		Table: &changeset.ChangesetTable{
+		Table: changeset.ChangesetTable{
 			Name:        tableName,
 			PrimaryKeys: []bool{true, false},
 		},
@@ -98,7 +98,7 @@ func writeChangeset(path string, entries []changeset.ChangesetEntry) error {
 			}
 		}
 		if name != currentTable || !sameSchema {
-			if err := writer.BeginTable(*entry.Table); err != nil {
+			if err := writer.BeginTable(entry.Table); err != nil {
 				return err
 			}
 			currentTable = name
@@ -131,7 +131,7 @@ func readEntries(path string) ([]changeset.ChangesetEntry, error) {
 		}
 		// Deep-clone: Reader reuses its internal Table, so we must copy it
 		cloned := entry.Clone()
-		cloned.Table = entry.Table.Clone()
+		cloned.Table = *entry.Table.Clone()
 		entries = append(entries, *cloned)
 	}
 	return entries, nil
@@ -183,7 +183,11 @@ func TestRebase_SimpleNoConflict(t *testing.T) {
 	if e.Op != changeset.OpInsert {
 		t.Errorf("expected INSERT, got %s", e.Op)
 	}
-	if pk := e.NewValues[0].AsInt(); pk != 6 {
+	pk, err := e.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if pk != 6 {
 		t.Errorf("expected pk=6, got pk=%d", pk)
 	}
 }
@@ -233,7 +237,11 @@ func TestRebase_ConcurrentInsertConflict(t *testing.T) {
 	}
 
 	// PK should have been remapped to max(theirs.inserted)+1 = 6
-	if pk := e.NewValues[0].AsInt(); pk != 6 {
+	pk, err := e.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if pk != 6 {
 		t.Errorf("expected remapped pk=6, got pk=%d", pk)
 	}
 }
@@ -426,8 +434,12 @@ func TestRebase_EmptyTheirs(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-	if e := entries[0]; e.Op != changeset.OpInsert || e.NewValues[0].AsInt() != 5 {
-		t.Errorf("unexpected entry: %s pk=%d", e.Op, e.NewValues[0].AsInt())
+	if e := entries[0]; e.Op != changeset.OpInsert {
+		t.Errorf("unexpected op: %s", e.Op)
+	} else if pk, err := e.NewValues[0].AsInt(); err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	} else if pk != 5 {
+		t.Errorf("unexpected entry: INSERT pk=%d", pk)
 	}
 }
 
@@ -468,8 +480,12 @@ func TestRebase_EmptyOurs(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-	if e := entries[0]; e.Op != changeset.OpInsert || e.NewValues[0].AsInt() != 5 {
-		t.Errorf("unexpected entry: %s pk=%d", e.Op, e.NewValues[0].AsInt())
+	if e := entries[0]; e.Op != changeset.OpInsert {
+		t.Errorf("unexpected op: %s", e.Op)
+	} else if pk, err := e.NewValues[0].AsInt(); err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	} else if pk != 5 {
+		t.Errorf("unexpected entry: INSERT pk=%d", pk)
 	}
 }
 
@@ -480,7 +496,7 @@ func TestRebase_ConflictJSON(t *testing.T) {
 
 	// BASE → THEIRS: UPDATE row PK=1, name "old" → "theirs_name", val 10 → 20
 	baseTheirs := filepath.Join(tmpDir, "base_theirs.diff")
-	table3Col := &changeset.ChangesetTable{
+	table3Col := changeset.ChangesetTable{
 		Name:        "test",
 		PrimaryKeys: []bool{true, false, false},
 	}
@@ -577,20 +593,33 @@ func TestRebase_GpkgContentsLastChange(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// gpkg_contents has many columns; we only care that column 4 is last_change
-	gpkgTable := &changeset.ChangesetTable{
+	gpkgTable := changeset.ChangesetTable{
 		Name: "gpkg_contents",
 		PrimaryKeys: []bool{
 			true, false, false, false, false, false, false, false, false, false,
 		},
 	}
 
+	oldVals, err := makeRowValues(&gpkgTable, 1, "features", "features", "", "2020-01-01T00:00:00.000Z",
+		0.0, 0.0, 0.0, 0.0, 4326)
+	if err != nil {
+		t.Fatalf("makeRowValues: %v", err)
+	}
+	newVals1, err := makeUpdateNewValues(&gpkgTable, 4, "2021-01-01T00:00:00.000Z")
+	if err != nil {
+		t.Fatalf("makeUpdateNewValues: %v", err)
+	}
+	newVals2, err := makeUpdateNewValues(&gpkgTable, 4, "2022-01-01T00:00:00.000Z")
+	if err != nil {
+		t.Fatalf("makeUpdateNewValues: %v", err)
+	}
+
 	baseTheirs := filepath.Join(tmpDir, "base_theirs.diff")
 	if err := writeChangeset(baseTheirs, []changeset.ChangesetEntry{
 		{
 			Op: changeset.OpUpdate, Table: gpkgTable,
-			OldValues: makeRowValues(gpkgTable, 1, "features", "features", "", "2020-01-01T00:00:00.000Z",
-				0.0, 0.0, 0.0, 0.0, 4326),
-			NewValues: makeUpdateNewValues(gpkgTable, 4, "2021-01-01T00:00:00.000Z"),
+			OldValues: oldVals,
+			NewValues: newVals1,
 		},
 	}); err != nil {
 		t.Fatalf("write baseTheirs: %v", err)
@@ -600,9 +629,8 @@ func TestRebase_GpkgContentsLastChange(t *testing.T) {
 	if err := writeChangeset(baseOurs, []changeset.ChangesetEntry{
 		{
 			Op: changeset.OpUpdate, Table: gpkgTable,
-			OldValues: makeRowValues(gpkgTable, 1, "features", "features", "", "2020-01-01T00:00:00.000Z",
-				0.0, 0.0, 0.0, 0.0, 4326),
-			NewValues: makeUpdateNewValues(gpkgTable, 4, "2022-01-01T00:00:00.000Z"),
+			OldValues: oldVals,
+			NewValues: newVals2,
 		},
 	}); err != nil {
 		t.Fatalf("write baseOurs: %v", err)
@@ -627,7 +655,7 @@ func TestRebase_GpkgContentsLastChange(t *testing.T) {
 }
 
 // makeRowValues creates a full oldValues slice for a table with all columns populated.
-func makeRowValues(table *changeset.ChangesetTable, pk int, vals ...interface{}) []changeset.Value {
+func makeRowValues(table *changeset.ChangesetTable, pk int, vals ...interface{}) ([]changeset.Value, error) {
 	result := make([]changeset.Value, len(table.PrimaryKeys))
 	// Set PK
 	for i, isPK := range table.PrimaryKeys {
@@ -642,37 +670,45 @@ func makeRowValues(table *changeset.ChangesetTable, pk int, vals ...interface{})
 			continue
 		}
 		if j < len(vals) {
-			result[i] = interfaceToValue(vals[j])
+			v, err := interfaceToValue(vals[j])
+			if err != nil {
+				return nil, err
+			}
+			result[i] = v
 			j++
 		}
 	}
-	return result
+	return result, nil
 }
 
 // makeUpdateNewValues creates newValues for an UPDATE entry: only specified column is set.
-func makeUpdateNewValues(table *changeset.ChangesetTable, col int, val interface{}) []changeset.Value {
+func makeUpdateNewValues(table *changeset.ChangesetTable, col int, val interface{}) ([]changeset.Value, error) {
 	result := make([]changeset.Value, len(table.PrimaryKeys))
 	for i := range result {
 		result[i] = changeset.NewValueUndefined()
 	}
-	result[col] = interfaceToValue(val)
-	return result
+	v, err := interfaceToValue(val)
+	if err != nil {
+		return nil, err
+	}
+	result[col] = v
+	return result, nil
 }
 
-func interfaceToValue(v interface{}) changeset.Value {
+func interfaceToValue(v interface{}) (changeset.Value, error) {
 	switch val := v.(type) {
 	case int:
-		return changeset.NewValueInt(int64(val))
+		return changeset.NewValueInt(int64(val)), nil
 	case int64:
-		return changeset.NewValueInt(val)
+		return changeset.NewValueInt(val), nil
 	case float64:
-		return changeset.NewValueDouble(val)
+		return changeset.NewValueDouble(val), nil
 	case string:
-		return changeset.NewValueText(val)
+		return changeset.NewValueText(val), nil
 	case nil:
-		return changeset.NewValueNull()
+		return changeset.NewValueNull(), nil
 	default:
-		panic(fmt.Sprintf("unexpected type %T", v))
+		return changeset.Value{}, fmt.Errorf("unexpected type %T", v)
 	}
 }
 
@@ -682,7 +718,7 @@ func TestInvertChangeset_InsertDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Use consistent 2-column schema for all entries on the same table
-	table2Col := &changeset.ChangesetTable{
+	table2Col := changeset.ChangesetTable{
 		Name:        "test",
 		PrimaryKeys: []bool{true, false},
 	}
@@ -744,7 +780,11 @@ func TestInvertChangeset_InsertDelete(t *testing.T) {
 	if inverted[0].Op != changeset.OpDelete {
 		t.Errorf("entry 0: expected DELETE, got %s", inverted[0].Op)
 	}
-	if pk := inverted[0].OldValues[0].AsInt(); pk != 1 {
+	pk, err := inverted[0].OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if pk != 1 {
 		t.Errorf("entry 0: expected pk=1, got %d", pk)
 	}
 
@@ -752,7 +792,11 @@ func TestInvertChangeset_InsertDelete(t *testing.T) {
 	if inverted[1].Op != changeset.OpInsert {
 		t.Errorf("entry 1: expected INSERT, got %s", inverted[1].Op)
 	}
-	if pk := inverted[1].NewValues[0].AsInt(); pk != 2 {
+	pk, err = inverted[1].NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if pk != 2 {
 		t.Errorf("entry 1: expected pk=2, got %d", pk)
 	}
 
@@ -760,10 +804,18 @@ func TestInvertChangeset_InsertDelete(t *testing.T) {
 	if inverted[2].Op != changeset.OpUpdate {
 		t.Errorf("entry 2: expected UPDATE, got %s", inverted[2].Op)
 	}
-	if old := inverted[2].OldValues[1].AsText(); old != "new" {
+	old, err := inverted[2].OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if old != "new" {
 		t.Errorf("entry 2: expected old='new', got %q", old)
 	}
-	if newVal := inverted[2].NewValues[1].AsText(); newVal != "old" {
+	newVal, err := inverted[2].NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if newVal != "old" {
 		t.Errorf("entry 2: expected new='old', got %q", newVal)
 	}
 }
@@ -856,7 +908,11 @@ func TestRebase_MultipleTables(t *testing.T) {
 			t.Errorf("expected INSERT, got %s", e.Op)
 			continue
 		}
-		entryMap[e.Table.Name] = int(e.NewValues[0].AsInt())
+		pk, err := e.NewValues[0].AsInt()
+		if err != nil {
+			t.Fatalf("unexpected type: %v", err)
+		}
+		entryMap[e.Table.Name] = int(pk)
 	}
 
 	if pk, ok := entryMap["a"]; !ok {
@@ -956,7 +1012,11 @@ func TestRebase_InsertMappingCascade(t *testing.T) {
 	// Collect PKs
 	pks := make(map[int]bool)
 	for _, e := range entries {
-		pks[int(e.NewValues[0].AsInt())] = true
+		pk, err := e.NewValues[0].AsInt()
+		if err != nil {
+			t.Fatalf("unexpected type: %v", err)
+		}
+		pks[int(pk)] = true
 	}
 
 	// The cascade: max theirs = 5, so freeIdx starts at 6.

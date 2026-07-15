@@ -111,11 +111,19 @@ func TestInvertInsertBecomesDelete(t *testing.T) {
 	if len(entry.OldValues) != 2 {
 		t.Fatalf("expected 2 old values, got %d", len(entry.OldValues))
 	}
-	if entry.OldValues[0].AsInt() != 1 {
-		t.Errorf("expected old int 1, got %d", entry.OldValues[0].AsInt())
+	oldInt, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
 	}
-	if entry.OldValues[1].AsText() != "hello" {
-		t.Errorf("expected old text 'hello', got %q", entry.OldValues[1].AsText())
+	if oldInt != 1 {
+		t.Errorf("expected old int 1, got %d", oldInt)
+	}
+	oldTxt, err := entry.OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldTxt != "hello" {
+		t.Errorf("expected old text 'hello', got %q", oldTxt)
 	}
 	if len(entry.NewValues) != 0 {
 		t.Errorf("expected no new values for DELETE, got %d", len(entry.NewValues))
@@ -163,8 +171,12 @@ func TestInvertDeleteBecomesInsert(t *testing.T) {
 	if entry.Op != OpInsert {
 		t.Errorf("expected OpInsert, got %v", entry.Op)
 	}
-	if entry.NewValues[0].AsInt() != 99 {
-		t.Errorf("expected new int 99, got %d", entry.NewValues[0].AsInt())
+	val, err := entry.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if val != 99 {
+		t.Errorf("expected new int 99, got %d", val)
 	}
 }
 
@@ -219,16 +231,28 @@ func TestInvertUpdateSwapsOldNew(t *testing.T) {
 	// After swap: old=[undefined, "new"], new=[int(1), "old"]
 	// Then PK reversal: old[0] is undefined → old[0] = new[0] = int(1), new[0] = undefined
 	// Result: old=[int(1), "new"], new=[undefined, "old"]
-	if entry.OldValues[0].AsInt() != 1 {
+	oldInt, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldInt != 1 {
 		t.Errorf("expected old[0] = 1, got %v", entry.OldValues[0])
 	}
-	if entry.OldValues[1].AsText() != "new" {
+	oldTxt, err := entry.OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldTxt != "new" {
 		t.Errorf("expected old[1] = 'new', got %v", entry.OldValues[1])
 	}
 	if !entry.NewValues[0].IsUndefined() {
 		t.Errorf("expected new[0] undefined, got %v", entry.NewValues[0])
 	}
-	if entry.NewValues[1].AsText() != "old" {
+	newTxt, err := entry.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if newTxt != "old" {
 		t.Errorf("expected new[1] = 'old', got %v", entry.NewValues[1])
 	}
 }
@@ -636,7 +660,10 @@ func TestConcatTwoInserts(t *testing.T) {
 		if entry.Op != OpInsert {
 			t.Errorf("expected OpInsert, got %v", entry.Op)
 		}
-		pk := entry.NewValues[0].AsInt()
+		pk, err := entry.NewValues[0].AsInt()
+		if err != nil {
+			t.Fatalf("unexpected type: %v", err)
+		}
 		seen[pk] = true
 	}
 
@@ -730,16 +757,28 @@ func TestConcatUpdateUpdateSamePK_Merge(t *testing.T) {
 	// vOld = mergeValue(e2.old="mid", e1.old="old") = "old" (vTwo wins)
 	// vNew = mergeValue(e1.new="mid", e2.new="new") = "new" (vTwo wins)
 	// So the merged UPDATE has old="old", new="new" with PK preserved.
-	if entry.OldValues[0].AsInt() != 1 {
+	oldInt, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldInt != 1 {
 		t.Errorf("expected old[0] = 1, got %v", entry.OldValues[0])
 	}
-	if entry.OldValues[1].AsText() != "old" {
+	oldTxt, err := entry.OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldTxt != "old" {
 		t.Errorf("expected old[1] = 'old', got %v", entry.OldValues[1])
 	}
 	if !entry.NewValues[0].IsUndefined() {
 		t.Errorf("expected new[0] undefined, got %v", entry.NewValues[0])
 	}
-	if entry.NewValues[1].AsText() != "new" {
+	newTxt, err := entry.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if newTxt != "new" {
 		t.Errorf("expected new[1] = 'new', got %v", entry.NewValues[1])
 	}
 
@@ -787,10 +826,18 @@ func TestConcatInsertUpdateSamePK(t *testing.T) {
 	if entry.Op != OpInsert {
 		t.Errorf("expected OpInsert, got %v", entry.Op)
 	}
-	if entry.NewValues[0].AsInt() != 1 {
+	intVal, err := entry.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if intVal != 1 {
 		t.Errorf("expected newValues[0] = 1, got %v", entry.NewValues[0])
 	}
-	if entry.NewValues[1].AsText() != "b" {
+	txtVal, err := entry.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if txtVal != "b" {
 		t.Errorf("expected newValues[1] = 'b', got %v", entry.NewValues[1])
 	}
 }
@@ -832,16 +879,28 @@ func TestConcatDeleteInsertSamePK_BecomesUpdate(t *testing.T) {
 	if entry.Op != OpUpdate {
 		t.Errorf("expected OpUpdate, got %v", entry.Op)
 	}
-	if entry.OldValues[0].AsInt() != 1 {
+	oldInt, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldInt != 1 {
 		t.Errorf("expected oldValues[0] = 1, got %v", entry.OldValues[0])
 	}
-	if entry.OldValues[1].AsText() != "a" {
+	oldTxt, err := entry.OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldTxt != "a" {
 		t.Errorf("expected oldValues[1] = 'a', got %v", entry.OldValues[1])
 	}
 	if !entry.NewValues[0].IsUndefined() {
 		t.Errorf("expected newValues[0] undefined, got %v", entry.NewValues[0])
 	}
-	if entry.NewValues[1].AsText() != "b" {
+	newTxt, err := entry.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if newTxt != "b" {
 		t.Errorf("expected newValues[1] = 'b', got %v", entry.NewValues[1])
 	}
 }
@@ -887,10 +946,18 @@ func TestConcatUpdateDeleteSamePK(t *testing.T) {
 	if entry.Op != OpDelete {
 		t.Errorf("expected OpDelete, got %v", entry.Op)
 	}
-	if entry.OldValues[0].AsInt() != 1 {
+	oldInt, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldInt != 1 {
 		t.Errorf("expected oldValues[0] = 1, got %v", entry.OldValues[0])
 	}
-	if entry.OldValues[1].AsText() != "a" {
+	oldTxt, err := entry.OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldTxt != "a" {
 		t.Errorf("expected oldValues[1] = 'a' (from UPDATE old), got %v", entry.OldValues[1])
 	}
 	if len(entry.NewValues) != 0 {
@@ -947,7 +1014,11 @@ func TestConcatThreeFiles(t *testing.T) {
 	if entry.Op != OpInsert {
 		t.Errorf("expected OpInsert, got %v", entry.Op)
 	}
-	if entry.NewValues[1].AsText() != "c" {
+	txtVal, err := entry.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if txtVal != "c" {
 		t.Errorf("expected 'c', got %v", entry.NewValues[1])
 	}
 }
@@ -994,7 +1065,15 @@ func TestConcatSameTableDifferentPKs(t *testing.T) {
 		if entry.Op != OpInsert {
 			t.Errorf("expected OpInsert, got %v", entry.Op)
 		}
-		seen[entry.NewValues[0].AsInt()] = entry.NewValues[1].AsText()
+		pk, err := entry.NewValues[0].AsInt()
+		if err != nil {
+			t.Fatalf("unexpected type: %v", err)
+		}
+		txt, err := entry.NewValues[1].AsText()
+		if err != nil {
+			t.Fatalf("unexpected type: %v", err)
+		}
+		seen[pk] = txt
 	}
 
 	if len(seen) != 3 {

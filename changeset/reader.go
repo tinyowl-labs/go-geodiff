@@ -70,7 +70,7 @@ func (r *Reader) NextEntry() (*ChangesetEntry, error) {
 
 			entry := &ChangesetEntry{
 				Op:    OperationType(typ),
-				Table: &r.mCurrentTable,
+				Table: r.mCurrentTable,
 			}
 
 			if typ != byte(OpInsert) {

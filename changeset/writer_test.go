@@ -301,10 +301,18 @@ func TestRoundTripMultipleTables(t *testing.T) {
 	if e1.Table.Name != "foo" {
 		t.Errorf("e1: expected table foo, got %q", e1.Table.Name)
 	}
-	if e1.NewValues[0].AsInt() != 1 {
+	intVal, err := e1.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if intVal != 1 {
 		t.Errorf("e1: expected int 1")
 	}
-	if e1.NewValues[1].AsText() != "one" {
+	txtVal, err := e1.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if txtVal != "one" {
 		t.Errorf("e1: expected text 'one'")
 	}
 
@@ -576,7 +584,10 @@ func TestWriterBigBlob(t *testing.T) {
 	defer r.Close()
 
 	entry, _ := r.NextEntry()
-	gotBlob := entry.NewValues[0].AsBlob()
+	gotBlob, err := entry.NewValues[0].AsBlob()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
 	if len(gotBlob) != 10000 {
 		t.Errorf("blob length: got %d, want 10000", len(gotBlob))
 	}
@@ -615,8 +626,12 @@ func TestWriterNewFileOverwrites(t *testing.T) {
 	if entry == nil {
 		t.Fatal("expected an entry")
 	}
-	if entry.NewValues[0].AsInt() != 999 {
-		t.Errorf("expected 999, got %d", entry.NewValues[0].AsInt())
+	val, err := entry.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if val != 999 {
+		t.Errorf("expected 999, got %d", val)
 	}
 
 	eof, _ := r.NextEntry()

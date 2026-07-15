@@ -8,6 +8,7 @@
 package geodiff
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -34,16 +35,16 @@ func Version() string {
 // CreateChangeset creates a binary diff between base and modified GPKG/SQLite files
 // and writes it to changeset.
 func CreateChangeset(base, modified, changesetPath string) error {
-	ctx := NewContext()
-	return createChangesetEx(ctx, "sqlite", nil, base, modified, changesetPath)
+	gctx := NewContext()
+	return createChangesetEx(gctx, "sqlite", nil, base, modified, changesetPath)
 }
 
-func createChangesetEx(ctx *Context, driverName string, driverExtraInfo map[string]string, base, modified, changesetPath string) error {
+func createChangesetEx(gctx *Context, driverName string, driverExtraInfo map[string]string, base, modified, changesetPath string) error {
 	if driverName == "" || base == "" || modified == "" || changesetPath == "" {
 		return NewGeoDiffError("NULL arguments to createChangesetEx")
 	}
 
-	drv := newDriver(ctx, driverName)
+	drv := newDriver(gctx, driverName)
 	conn := map[string]string{
 		"base":     base,
 		"modified": modified,
@@ -52,19 +53,19 @@ func createChangesetEx(ctx *Context, driverName string, driverExtraInfo map[stri
 	for k, v := range driverExtraInfo {
 		conn[k] = v
 	}
-	if err := drv.Open(conn); err != nil {
-		return wrapDriverError(ctx, "Unable to open databases for createChangeset", err)
+	if err := drv.Open(context.Background(), conn); err != nil {
+		return wrapDriverError(gctx, "Unable to open databases for createChangeset", err)
 	}
 	defer drv.Close()
 
 	w, err := changeset.NewWriter(changesetPath)
 	if err != nil {
-		return wrapError(ctx, "Unable to create changeset file", err)
+		return wrapError(gctx, "Unable to create changeset file", err)
 	}
 	defer w.Close()
 
-	if err := drv.CreateChangeset(w); err != nil {
-		return wrapError(ctx, "Failed to create changeset", err)
+	if err := drv.CreateChangeset(context.Background(), w); err != nil {
+		return wrapError(gctx, "Failed to create changeset", err)
 	}
 	return nil
 }
@@ -90,7 +91,7 @@ func applyChangesetEx(ctx *Context, driverName string, driverExtraInfo map[strin
 	for k, v := range driverExtraInfo {
 		conn[k] = v
 	}
-	if err := drv.Open(conn); err != nil {
+	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(ctx, "Unable to open database for applyChangeset", err)
 	}
 	defer drv.Close()
@@ -106,7 +107,7 @@ func applyChangesetEx(ctx *Context, driverName string, driverExtraInfo map[strin
 		return nil
 	}
 
-	err = drv.ApplyChangeset(reader)
+	err = drv.ApplyChangeset(context.Background(), reader)
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "conflicts") || strings.Contains(msg, "constraint") {
@@ -147,61 +148,8 @@ func invertChangesetByPath(ctx *Context, changesetPath, changesetInv string) err
 	}
 	defer writer.Close()
 
-	return invertChangeset(reader, writer)
-}
-
-// invertChangeset reads all entries from reader, inverts them, and writes to writer.
-func invertChangeset(reader *changeset.Reader, writer *changeset.Writer) error {
-	for {
-		entry, err := reader.NextEntry()
-		if err != nil {
-			return fmt.Errorf("error reading changeset during invert: %w", err)
-		}
-		if entry == nil {
-			break
-		}
-		// Write table header if table changed.
-		if entry.Table != nil {
-			if err := writer.BeginTable(*entry.Table); err != nil {
-				return fmt.Errorf("error writing table header during invert: %w", err)
-			}
-		}
-
-		inverted := invertEntry(entry)
-		if err := writer.WriteEntry(inverted); err != nil {
-			return fmt.Errorf("error writing inverted entry: %w", err)
-		}
-	}
-	return nil
-}
-
-// invertEntry returns the inverse of a changeset entry:
-//
-//	INSERT → DELETE, DELETE → INSERT, UPDATE → UPDATE with old/new swapped.
-func invertEntry(entry *changeset.ChangesetEntry) changeset.ChangesetEntry {
-	switch entry.Op {
-	case changeset.OpInsert:
-		return changeset.ChangesetEntry{
-			Op:        changeset.OpDelete,
-			OldValues: entry.NewValues,
-			Table:     entry.Table,
-		}
-	case changeset.OpDelete:
-		return changeset.ChangesetEntry{
-			Op:        changeset.OpInsert,
-			NewValues: entry.OldValues,
-			Table:     entry.Table,
-		}
-	case changeset.OpUpdate:
-		return changeset.ChangesetEntry{
-			Op:        changeset.OpUpdate,
-			OldValues: entry.NewValues,
-			NewValues: entry.OldValues,
-			Table:     entry.Table,
-		}
-	default:
-		return *entry
-	}
+	// Delegate to the canonical implementation in the changeset package.
+	return changeset.InvertChangeset(reader, writer)
 }
 
 // ---------------------------------------------------------------------------
@@ -315,16 +263,20 @@ func valueToJSON(v changeset.Value) json.RawMessage {
 	case changeset.TypeNull:
 		return json.RawMessage(`null`)
 	case changeset.TypeInt:
-		b, _ := json.Marshal(v.AsInt())
+		n, _ := v.AsInt()
+		b, _ := json.Marshal(n)
 		return b
 	case changeset.TypeDouble:
-		b, _ := json.Marshal(v.AsDouble())
+		f, _ := v.AsDouble()
+		b, _ := json.Marshal(f)
 		return b
 	case changeset.TypeText:
-		b, _ := json.Marshal(v.AsText())
+		s, _ := v.AsText()
+		b, _ := json.Marshal(s)
 		return b
 	case changeset.TypeBlob:
-		b, _ := json.Marshal(fmt.Sprintf("<blob %d bytes>", len(v.AsBlob())))
+		blb, _ := v.AsBlob()
+		b, _ := json.Marshal(fmt.Sprintf("<blob %d bytes>", len(blb)))
 		return b
 	default:
 		return json.RawMessage(`null`)
@@ -332,9 +284,8 @@ func valueToJSON(v changeset.Value) json.RawMessage {
 }
 
 // columnName returns the column name from the table, or an empty string if out of range.
-func columnName(table *changeset.ChangesetTable, idx int) string {
-	// ChangesetTable does not store column names — they are implied by position.
-	// We return empty string; callers that know the schema can enrich this later.
+// NOTE: ChangesetTable does not store column names, so this always returns "".
+func columnName(table changeset.ChangesetTable, idx int) string {
 	_ = table
 	_ = idx
 	return ""
@@ -501,7 +452,7 @@ func ConcatChanges(inputFiles []string, outputFile string) error {
 
 			tableName := entry.Table.Name
 			if tableName != lastTableName {
-				if err := writer.BeginTable(*entry.Table); err != nil {
+				if err := writer.BeginTable(entry.Table); err != nil {
 					reader.Close()
 					return wrapError(ctx, "Error writing table header in concat", err)
 				}
@@ -541,12 +492,12 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	if extraInfo != "" {
 		srcConn["conninfo"] = extraInfo
 	}
-	if err := srcDriver.Open(srcConn); err != nil {
+	if err := srcDriver.Open(context.Background(), srcConn); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
 	defer srcDriver.Close()
 
-	tableNames, err := srcDriver.ListTables(false)
+	tableNames, err := srcDriver.ListTables(context.Background(), false)
 	if err != nil {
 		return wrapDriverError(ctx, "Failed to list source tables", err)
 	}
@@ -554,7 +505,7 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 
 	var tables []*schema.TableSchema
 	for _, name := range tableNames {
-		tbl, err := srcDriver.TableSchema(name, false)
+		tbl, err := srcDriver.TableSchema(context.Background(), name, false)
 		if err != nil {
 			return wrapDriverError(ctx, "Failed to read table schema: "+name, err)
 		}
@@ -568,7 +519,7 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	if err != nil {
 		return wrapError(ctx, "Failed to create temporary changeset", err)
 	}
-	if err := srcDriver.DumpData(w, false); err != nil {
+	if err := srcDriver.DumpData(context.Background(), w, false); err != nil {
 		w.Close()
 		return wrapDriverError(ctx, "Failed to dump source data", err)
 	}
@@ -579,12 +530,12 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	if extraInfoDst != "" {
 		dstConn["conninfo"] = extraInfoDst
 	}
-	if err := dstDriver.Create(dstConn, true); err != nil {
+	if err := dstDriver.Create(context.Background(), dstConn, true); err != nil {
 		return wrapDriverError(ctx, "Cannot create destination database", err)
 	}
 	defer dstDriver.Close()
 
-	if err := dstDriver.CreateTables(tables); err != nil {
+	if err := dstDriver.CreateTables(context.Background(), tables); err != nil {
 		return wrapDriverError(ctx, "Failed to create tables in destination", err)
 	}
 
@@ -594,7 +545,7 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	}
 	defer reader.Close()
 
-	if err := dstDriver.ApplyChangeset(reader); err != nil {
+	if err := dstDriver.ApplyChangeset(context.Background(), reader); err != nil {
 		return wrapDriverError(ctx, "Failed to apply data to destination", err)
 	}
 	return nil
@@ -622,19 +573,19 @@ func MakeCopySqlite(src, dst string) error {
 
 	// Use sqlite3 backup approach: open source, create/open dest, dump+apply.
 	srcDriver := driver.NewSqliteDriver()
-	if err := srcDriver.Open(map[string]string{"base": src}); err != nil {
+	if err := srcDriver.Open(context.Background(), map[string]string{"base": src}); err != nil {
 		return wrapError(ctx, "makeCopySqlite: Unable to open source database: "+src, err)
 	}
 	defer srcDriver.Close()
 
-	tableNames, err := srcDriver.ListTables(false)
+	tableNames, err := srcDriver.ListTables(context.Background(), false)
 	if err != nil {
 		return wrapDriverError(ctx, "makeCopySqlite: Failed to list source tables", err)
 	}
 
 	var tables []*schema.TableSchema
 	for _, name := range tableNames {
-		tbl, err := srcDriver.TableSchema(name, false)
+		tbl, err := srcDriver.TableSchema(context.Background(), name, false)
 		if err != nil {
 			return wrapDriverError(ctx, "makeCopySqlite: Failed to read schema for table: "+name, err)
 		}
@@ -648,20 +599,20 @@ func MakeCopySqlite(src, dst string) error {
 	if err != nil {
 		return wrapError(ctx, "makeCopySqlite: Failed to create temp changeset", err)
 	}
-	if err := srcDriver.DumpData(w, false); err != nil {
+	if err := srcDriver.DumpData(context.Background(), w, false); err != nil {
 		w.Close()
 		return wrapDriverError(ctx, "makeCopySqlite: Failed to dump source data", err)
 	}
 	w.Close()
 
 	dstDriver := driver.NewSqliteDriver()
-	if err := dstDriver.Create(map[string]string{"base": dst}, true); err != nil {
+	if err := dstDriver.Create(context.Background(), map[string]string{"base": dst}, true); err != nil {
 		ctx.setAndLogError("makeCopySqlite: Unable to open destination database: " + dst + "\n" + err.Error())
 		return NewGeoDiffError("makeCopySqlite: Unable to open destination database: " + dst)
 	}
 	defer dstDriver.Close()
 
-	if err := dstDriver.CreateTables(tables); err != nil {
+	if err := dstDriver.CreateTables(context.Background(), tables); err != nil {
 		return wrapDriverError(ctx, "makeCopySqlite: Failed to create tables in destination", err)
 	}
 
@@ -671,7 +622,7 @@ func MakeCopySqlite(src, dst string) error {
 	}
 	defer reader.Close()
 
-	if err := dstDriver.ApplyChangeset(reader); err != nil {
+	if err := dstDriver.ApplyChangeset(context.Background(), reader); err != nil {
 		return wrapDriverError(ctx, "makeCopySqlite: Failed to apply data to destination", err)
 	}
 	return nil
@@ -694,7 +645,7 @@ func DumpData(driverName, extraInfo, src, changesetPath string) error {
 	if extraInfo != "" {
 		conn["conninfo"] = extraInfo
 	}
-	if err := drv.Open(conn); err != nil {
+	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
 	defer drv.Close()
@@ -705,7 +656,7 @@ func DumpData(driverName, extraInfo, src, changesetPath string) error {
 	}
 	defer w.Close()
 
-	if err := drv.DumpData(w, false); err != nil {
+	if err := drv.DumpData(context.Background(), w, false); err != nil {
 		return wrapDriverError(ctx, "Failed to dump data", err)
 	}
 	return nil
@@ -728,12 +679,12 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 	if extraInfo != "" {
 		conn["conninfo"] = extraInfo
 	}
-	if err := drv.Open(conn); err != nil {
+	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
 	defer drv.Close()
 
-	tableNames, err := drv.ListTables(false)
+	tableNames, err := drv.ListTables(context.Background(), false)
 	if err != nil {
 		return wrapDriverError(ctx, "Failed to list tables", err)
 	}
@@ -766,7 +717,7 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 
 	var tables []tableJSON
 	for _, name := range tableNames {
-		tbl, err := drv.TableSchema(name, false)
+		tbl, err := drv.TableSchema(context.Background(), name, false)
 		if err != nil {
 			return wrapDriverError(ctx, "Failed to read schema for table: "+name, err)
 		}
@@ -863,7 +814,7 @@ func CreateRebasedChangeset(base, modified, base2their, rebased, conflictFile st
 
 	// Verify we can open the database.
 	drv := driver.NewSqliteDriver()
-	if err := drv.Open(map[string]string{"base": modified}); err != nil {
+	if err := drv.Open(context.Background(), map[string]string{"base": modified}); err != nil {
 		drv.Close()
 		return wrapDriverError(ctx, "Unable to open database for rebase validation", err)
 	}
@@ -1062,7 +1013,7 @@ func rebaseChangesets(ctx *Context, base2theirs, output, their2base string) ([]c
 			if len(ourEntries) == 0 {
 				// No conflict: just write their change (it applies cleanly).
 				if !writtenTables[tableName] {
-					if err := writer.BeginTable(*entry.Table); err != nil {
+					if err := writer.BeginTable(entry.Table); err != nil {
 						return nil, wrapError(ctx, "Failed to write table header", err)
 					}
 					writtenTables[tableName] = true
@@ -1109,7 +1060,7 @@ func rebaseChangesets(ctx *Context, base2theirs, output, their2base string) ([]c
 
 			// Still write their change.
 			if !writtenTables[tableName] {
-				if err := writer.BeginTable(*entry.Table); err != nil {
+				if err := writer.BeginTable(entry.Table); err != nil {
 					return nil, wrapError(ctx, "Failed to write table header", err)
 				}
 				writtenTables[tableName] = true
@@ -1164,18 +1115,16 @@ func extractPK(entry *changeset.ChangesetEntry) int {
 	}
 
 	// Find the first PK column.
-	if entry.Table == nil {
-		return 0
-	}
 	for i, isPK := range entry.Table.PrimaryKeys {
 		if isPK && i < len(vals) {
 			v := vals[i]
 			switch v.Type() {
 			case changeset.TypeInt:
-				return int(v.AsInt())
+				n, _ := v.AsInt()
+				return int(n)
 			case changeset.TypeText:
 				// Hash the string just like the C++ get_primary_key.
-				s := v.AsText()
+				s, _ := v.AsText()
 				h := 0
 				for _, c := range []byte(s) {
 					h = 33*h + int(c)

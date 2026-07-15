@@ -86,8 +86,12 @@ func TestReaderRewind(t *testing.T) {
 	if e3 != nil {
 		t.Fatal("expected EOF after two entries")
 	}
-	if e1.NewValues[0].AsInt() != 1 {
-		t.Errorf("expected 1, got %d", e1.NewValues[0].AsInt())
+	val, err := e1.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if val != 1 {
+		t.Errorf("expected 1, got %d", val)
 	}
 
 	// Rewind and read again
@@ -103,8 +107,12 @@ func TestReaderRewind(t *testing.T) {
 	if e3 != nil {
 		t.Fatal("expected EOF after two entries on rewind")
 	}
-	if e1.NewValues[0].AsInt() != 1 {
-		t.Errorf("after rewind: expected 1, got %d", e1.NewValues[0].AsInt())
+	val, err = e1.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if val != 1 {
+		t.Errorf("after rewind: expected 1, got %d", val)
 	}
 }
 
@@ -154,14 +162,26 @@ func TestReaderInsert(t *testing.T) {
 	if len(entry.OldValues) != 0 {
 		t.Error("expected no old values for INSERT")
 	}
-	if entry.NewValues[0].AsInt() != 42 {
-		t.Errorf("expected 42, got %d", entry.NewValues[0].AsInt())
+	intVal, err := entry.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
 	}
-	if entry.NewValues[1].AsDouble() != 3.14 {
-		t.Errorf("expected 3.14, got %g", entry.NewValues[1].AsDouble())
+	if intVal != 42 {
+		t.Errorf("expected 42, got %d", intVal)
 	}
-	if entry.NewValues[2].AsText() != "hello" {
-		t.Errorf("expected 'hello', got %q", entry.NewValues[2].AsText())
+	dblVal, err := entry.NewValues[1].AsDouble()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if dblVal != 3.14 {
+		t.Errorf("expected 3.14, got %g", dblVal)
+	}
+	txtVal, err := entry.NewValues[2].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if txtVal != "hello" {
+		t.Errorf("expected 'hello', got %q", txtVal)
 	}
 
 	// Verify EOF
@@ -203,8 +223,12 @@ func TestReaderDelete(t *testing.T) {
 	if entry.Op != OpDelete {
 		t.Errorf("expected DELETE, got %v", entry.Op)
 	}
-	if entry.OldValues[0].AsInt() != 99 {
-		t.Errorf("expected 99, got %d", entry.OldValues[0].AsInt())
+	val, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if val != 99 {
+		t.Errorf("expected 99, got %d", val)
 	}
 	if len(entry.NewValues) != 0 {
 		t.Error("expected no new values for DELETE")
@@ -247,17 +271,29 @@ func TestReaderUpdate(t *testing.T) {
 	if entry.Op != OpUpdate {
 		t.Errorf("expected UPDATE, got %v", entry.Op)
 	}
-	if entry.OldValues[0].AsInt() != 1 {
-		t.Errorf("expected old int 1, got %d", entry.OldValues[0].AsInt())
+	oldInt, err := entry.OldValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
 	}
-	if entry.OldValues[1].AsText() != "old" {
-		t.Errorf("expected old text 'old', got %q", entry.OldValues[1].AsText())
+	if oldInt != 1 {
+		t.Errorf("expected old int 1, got %d", oldInt)
+	}
+	oldTxt, err := entry.OldValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if oldTxt != "old" {
+		t.Errorf("expected old text 'old', got %q", oldTxt)
 	}
 	if !entry.NewValues[0].IsUndefined() {
 		t.Error("expected undefined for PK in new values")
 	}
-	if entry.NewValues[1].AsText() != "new" {
-		t.Errorf("expected new text 'new', got %q", entry.NewValues[1].AsText())
+	newTxt, err := entry.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if newTxt != "new" {
+		t.Errorf("expected new text 'new', got %q", newTxt)
 	}
 }
 
@@ -298,24 +334,36 @@ func TestReaderAllValueTypes(t *testing.T) {
 	if entry.NewValues[0].Type() != TypeInt {
 		t.Errorf("expected TypeInt, got %v", entry.NewValues[0].Type())
 	}
-	if entry.NewValues[0].AsInt() != -1234567890123456789 {
-		t.Errorf("int mismatch: got %d", entry.NewValues[0].AsInt())
+	intVal, err := entry.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if intVal != -1234567890123456789 {
+		t.Errorf("int mismatch: got %d", intVal)
 	}
 
 	// Double
 	if entry.NewValues[1].Type() != TypeDouble {
 		t.Errorf("expected TypeDouble, got %v", entry.NewValues[1].Type())
 	}
-	if entry.NewValues[1].AsDouble() != 1.7976931348623157e+308 {
-		t.Errorf("double mismatch: got %g", entry.NewValues[1].AsDouble())
+	dblVal, err := entry.NewValues[1].AsDouble()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if dblVal != 1.7976931348623157e+308 {
+		t.Errorf("double mismatch: got %g", dblVal)
 	}
 
 	// Text
 	if entry.NewValues[2].Type() != TypeText {
 		t.Errorf("expected TypeText, got %v", entry.NewValues[2].Type())
 	}
-	if entry.NewValues[2].AsText() != "unicode: 你好世界 🌍" {
-		t.Errorf("text mismatch: got %q", entry.NewValues[2].AsText())
+	txtVal, err := entry.NewValues[2].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if txtVal != "unicode: 你好世界 🌍" {
+		t.Errorf("text mismatch: got %q", txtVal)
 	}
 
 	// Blob
@@ -323,7 +371,10 @@ func TestReaderAllValueTypes(t *testing.T) {
 		t.Errorf("expected TypeBlob, got %v", entry.NewValues[3].Type())
 	}
 	expectedBlob := []byte{0x00, 0xFF, 0x42, 0x01, 0x7F, 0x80}
-	gotBlob := entry.NewValues[3].AsBlob()
+	gotBlob, err := entry.NewValues[3].AsBlob()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
 	if len(gotBlob) != len(expectedBlob) {
 		t.Errorf("blob length mismatch: got %d, want %d", len(gotBlob), len(expectedBlob))
 	}
@@ -392,8 +443,12 @@ func TestReaderMultipleTables(t *testing.T) {
 	if e1.Table.Name != "foo" {
 		t.Errorf("expected table foo, got %q", e1.Table.Name)
 	}
-	if e1.NewValues[0].AsInt() != 1 {
-		t.Errorf("expected 1, got %d", e1.NewValues[0].AsInt())
+	intVal, err := e1.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if intVal != 1 {
+		t.Errorf("expected 1, got %d", intVal)
 	}
 
 	// Entry 2: table "foo"
@@ -404,8 +459,12 @@ func TestReaderMultipleTables(t *testing.T) {
 	if e2.Table.Name != "foo" {
 		t.Errorf("expected table foo, got %q", e2.Table.Name)
 	}
-	if e2.NewValues[0].AsInt() != 2 {
-		t.Errorf("expected 2, got %d", e2.NewValues[0].AsInt())
+	intVal, err = e2.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if intVal != 2 {
+		t.Errorf("expected 2, got %d", intVal)
 	}
 
 	// Entry 3: table "bar"
@@ -419,11 +478,19 @@ func TestReaderMultipleTables(t *testing.T) {
 	if e3.Table.ColumnCount() != 2 {
 		t.Errorf("expected 2 columns, got %d", e3.Table.ColumnCount())
 	}
-	if e3.NewValues[0].AsInt() != 3 {
-		t.Errorf("expected 3, got %d", e3.NewValues[0].AsInt())
+	intVal, err = e3.NewValues[0].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
 	}
-	if e3.NewValues[1].AsText() != "x" {
-		t.Errorf("expected 'x', got %q", e3.NewValues[1].AsText())
+	if intVal != 3 {
+		t.Errorf("expected 3, got %d", intVal)
+	}
+	txtVal, err := e3.NewValues[1].AsText()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if txtVal != "x" {
+		t.Errorf("expected 'x', got %q", txtVal)
 	}
 
 	// EOF
@@ -518,8 +585,12 @@ func TestReaderVarintEdgeCases(t *testing.T) {
 	if e2.Table.ColumnCount() != 200 {
 		t.Errorf("expected 200 columns, got %d", e2.Table.ColumnCount())
 	}
-	if e2.NewValues[199].AsInt() != 199 {
-		t.Errorf("expected 199, got %d", e2.NewValues[199].AsInt())
+	val, err := e2.NewValues[199].AsInt()
+	if err != nil {
+		t.Fatalf("unexpected type: %v", err)
+	}
+	if val != 199 {
+		t.Errorf("expected 199, got %d", val)
 	}
 }
 
@@ -554,8 +625,12 @@ func TestReaderLargeFile(t *testing.T) {
 		if entry == nil {
 			break
 		}
-		if entry.NewValues[0].AsInt() != int64(count) {
-			t.Errorf("entry %d: expected %d, got %d", count, count, entry.NewValues[0].AsInt())
+		val, err := entry.NewValues[0].AsInt()
+		if err != nil {
+			t.Fatalf("unexpected type: %v", err)
+		}
+		if val != int64(count) {
+			t.Errorf("entry %d: expected %d, got %d", count, count, val)
 		}
 		count++
 	}
