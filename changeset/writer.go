@@ -130,19 +130,21 @@ func (w *Writer) writeRowValues(values []Value) error {
 
 		switch typ {
 		case TypeInt: // 0x01
-			binary.BigEndian.PutUint64(w.tmp[:8], uint64(values[i].AsInt()))
+			n, _ := values[i].AsInt()
+			binary.BigEndian.PutUint64(w.tmp[:8], uint64(n))
 			if _, err := w.file.Write(w.tmp[:8]); err != nil {
 				return err
 			}
 
 		case TypeDouble: // 0x02
-			binary.BigEndian.PutUint64(w.tmp[:8], math.Float64bits(values[i].AsDouble()))
+			f, _ := values[i].AsDouble()
+			binary.BigEndian.PutUint64(w.tmp[:8], math.Float64bits(f))
 			if _, err := w.file.Write(w.tmp[:8]); err != nil {
 				return err
 			}
 
 		case TypeText: // 0x03
-			s := values[i].AsText()
+			s, _ := values[i].AsText()
 			if err := w.writeVarint(len(s)); err != nil {
 				return err
 			}
@@ -151,7 +153,7 @@ func (w *Writer) writeRowValues(values []Value) error {
 			}
 
 		case TypeBlob: // 0x04
-			b := values[i].AsBlob()
+			b, _ := values[i].AsBlob()
 			if err := w.writeVarint(len(b)); err != nil {
 				return err
 			}

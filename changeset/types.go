@@ -83,36 +83,36 @@ func (v Value) IsUndefined() bool { return v.mType == TypeUndefined }
 // IsNull returns true if the value type is Null.
 func (v Value) IsNull() bool { return v.mType == TypeNull }
 
-// AsInt returns the integer value. Panics if type is not TypeInt.
-func (v Value) AsInt() int64 {
+// AsInt returns the integer value. Returns an error if type is not TypeInt.
+func (v Value) AsInt() (int64, error) {
 	if v.mType != TypeInt {
-		panic(fmt.Sprintf("Value.AsInt called on %s", v.mType))
+		return 0, fmt.Errorf("Value.AsInt called on %s", v.mType)
 	}
-	return v.intVal
+	return v.intVal, nil
 }
 
-// AsDouble returns the double value. Panics if type is not TypeDouble.
-func (v Value) AsDouble() float64 {
+// AsDouble returns the double value. Returns an error if type is not TypeDouble.
+func (v Value) AsDouble() (float64, error) {
 	if v.mType != TypeDouble {
-		panic(fmt.Sprintf("Value.AsDouble called on %s", v.mType))
+		return 0, fmt.Errorf("Value.AsDouble called on %s", v.mType)
 	}
-	return v.floatVal
+	return v.floatVal, nil
 }
 
-// AsText returns the text value. Panics if type is not TypeText or TypeBlob.
-func (v Value) AsText() string {
+// AsText returns the text value. Returns an error if type is not TypeText or TypeBlob.
+func (v Value) AsText() (string, error) {
 	if v.mType != TypeText && v.mType != TypeBlob {
-		panic(fmt.Sprintf("Value.AsText called on %s", v.mType))
+		return "", fmt.Errorf("Value.AsText called on %s", v.mType)
 	}
-	return v.strVal
+	return v.strVal, nil
 }
 
-// AsBlob returns the blob value. Panics if type is not TypeText or TypeBlob.
-func (v Value) AsBlob() []byte {
+// AsBlob returns the blob value. Returns an error if type is not TypeText or TypeBlob.
+func (v Value) AsBlob() ([]byte, error) {
 	if v.mType != TypeText && v.mType != TypeBlob {
-		panic(fmt.Sprintf("Value.AsBlob called on %s", v.mType))
+		return nil, fmt.Errorf("Value.AsBlob called on %s", v.mType)
 	}
-	return v.blobVal
+	return v.blobVal, nil
 }
 
 // String returns a human-readable representation of the value.
@@ -233,10 +233,10 @@ type ChangesetEntry struct {
 	Op        OperationType
 	OldValues []Value
 	NewValues []Value
-	Table     *ChangesetTable
+	Table     ChangesetTable
 }
 
-// Clone returns a deep copy of the entry (shallow copy of Table pointer).
+// Clone returns a deep copy of the entry.
 func (e *ChangesetEntry) Clone() *ChangesetEntry {
 	ce := &ChangesetEntry{
 		Op:    e.Op,

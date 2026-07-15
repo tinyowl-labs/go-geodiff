@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// tmpPath returns a path in the system temp directory.
-func tmpPath(pattern string) string {
-	return filepath.Join(os.TempDir(), pattern)
+// tmpPath returns a path in the test's temp directory.
+func tmpPath(t *testing.T, pattern string) string {
+	return filepath.Join(t.TempDir(), pattern)
 }
 
 // createTestDB creates a simple SQLite database with a "simple" table.
@@ -92,10 +92,10 @@ func TestVersion(t *testing.T) {
 // and applying it. We use INSERT-only changes to avoid the driver's partial-update
 // WHERE clause behavior (non-PK undefined old values become IS NULL).
 func TestCreateChangesetApplyRoundTrip(t *testing.T) {
-	base := tmpPath("test_roundtrip_base.sqlite")
-	modified := tmpPath("test_roundtrip_modified.sqlite")
-	applied := tmpPath("test_roundtrip_applied.sqlite")
-	diff := tmpPath("test_roundtrip.diff")
+	base := tmpPath(t, "test_roundtrip_base.sqlite")
+	modified := tmpPath(t, "test_roundtrip_modified.sqlite")
+	applied := tmpPath(t, "test_roundtrip_applied.sqlite")
+	diff := tmpPath(t, "test_roundtrip.diff")
 	defer os.Remove(base)
 	defer os.Remove(modified)
 	defer os.Remove(applied)
@@ -177,10 +177,10 @@ func TestCreateChangesetApplyRoundTrip(t *testing.T) {
 
 // TestCreateChangesetDelete tests creating a changeset with a DELETE.
 func TestCreateChangesetDelete(t *testing.T) {
-	base := tmpPath("test_del_base.sqlite")
-	modified := tmpPath("test_del_modified.sqlite")
-	applied := tmpPath("test_del_applied.sqlite")
-	diff := tmpPath("test_del.diff")
+	base := tmpPath(t, "test_del_base.sqlite")
+	modified := tmpPath(t, "test_del_modified.sqlite")
+	applied := tmpPath(t, "test_del_applied.sqlite")
+	diff := tmpPath(t, "test_del.diff")
 	defer os.Remove(base)
 	defer os.Remove(modified)
 	defer os.Remove(applied)
@@ -227,11 +227,11 @@ func TestCreateChangesetDelete(t *testing.T) {
 // TestInvertChangesetRoundTrip tests that inverting a changeset then applying it
 // to the modified version produces the original base.
 func TestInvertChangesetRoundTrip(t *testing.T) {
-	base := tmpPath("test_invert_base.sqlite")
-	modified := tmpPath("test_invert_modified.sqlite")
-	restored := tmpPath("test_invert_restored.sqlite")
-	diff := tmpPath("test_invert.diff")
-	diffInv := tmpPath("test_invert_inv.diff")
+	base := tmpPath(t, "test_invert_base.sqlite")
+	modified := tmpPath(t, "test_invert_modified.sqlite")
+	restored := tmpPath(t, "test_invert_restored.sqlite")
+	diff := tmpPath(t, "test_invert.diff")
+	diffInv := tmpPath(t, "test_invert_inv.diff")
 	defer os.Remove(base)
 	defer os.Remove(modified)
 	defer os.Remove(restored)
@@ -299,10 +299,10 @@ func TestInvertChangesetRoundTrip(t *testing.T) {
 
 // TestListChangesJSON tests that ListChanges writes valid JSON.
 func TestListChangesJSON(t *testing.T) {
-	base := tmpPath("test_list_base.sqlite")
-	modified := tmpPath("test_list_modified.sqlite")
-	diff := tmpPath("test_list.diff")
-	jsonFile := tmpPath("test_list.json")
+	base := tmpPath(t, "test_list_base.sqlite")
+	modified := tmpPath(t, "test_list_modified.sqlite")
+	diff := tmpPath(t, "test_list.diff")
+	jsonFile := tmpPath(t, "test_list.json")
 	defer os.Remove(base)
 	defer os.Remove(modified)
 	defer os.Remove(diff)
@@ -346,7 +346,7 @@ func TestListChangesJSON(t *testing.T) {
 	}
 
 	// Also test summary.
-	summaryFile := tmpPath("test_list_summary.json")
+	summaryFile := tmpPath(t, "test_list_summary.json")
 	defer os.Remove(summaryFile)
 	if err := ListChangesSummary(diff, summaryFile); err != nil {
 		t.Fatalf("ListChangesSummary failed: %v", err)
@@ -363,12 +363,12 @@ func TestListChangesJSON(t *testing.T) {
 // TestConcatChanges tests combining multiple changesets and verifies the
 // concatenated file contains the right number of entries.
 func TestConcatChanges(t *testing.T) {
-	base := tmpPath("test_concat_base.sqlite")
-	modA := tmpPath("test_concat_modA.sqlite")
-	modB := tmpPath("test_concat_modB.sqlite")
-	diffA := tmpPath("test_concat_a.diff")
-	diffB := tmpPath("test_concat_b.diff")
-	concatFile := tmpPath("test_concat_merged.diff")
+	base := tmpPath(t, "test_concat_base.sqlite")
+	modA := tmpPath(t, "test_concat_modA.sqlite")
+	modB := tmpPath(t, "test_concat_modB.sqlite")
+	diffA := tmpPath(t, "test_concat_a.diff")
+	diffB := tmpPath(t, "test_concat_b.diff")
+	concatFile := tmpPath(t, "test_concat_merged.diff")
 	defer os.Remove(base)
 	defer os.Remove(modA)
 	defer os.Remove(modB)
@@ -431,8 +431,8 @@ func TestConcatChanges(t *testing.T) {
 
 // TestMakeCopySqlite tests copying a SQLite database.
 func TestMakeCopySqlite(t *testing.T) {
-	src := tmpPath("test_copy_src.sqlite")
-	dst := tmpPath("test_copy_dst.sqlite")
+	src := tmpPath(t, "test_copy_src.sqlite")
+	dst := tmpPath(t, "test_copy_dst.sqlite")
 	defer os.Remove(src)
 	defer os.Remove(dst)
 
@@ -567,10 +567,10 @@ func TestCreateWkbFromGpkgHeader(t *testing.T) {
 // TestRebaseRoundTrip tests the rebase workflow. This test covers situation 2:
 // base→ours has no changes (ours == base), so the result is simply theirs applied to ours.
 func TestRebaseRoundTrip(t *testing.T) {
-	base := tmpPath("test_rebase_base.sqlite")
-	theirs := tmpPath("test_rebase_theirs.sqlite")
-	ours := tmpPath("test_rebase_ours.sqlite")
-	conflict := tmpPath("test_rebase_conflict.json")
+	base := tmpPath(t, "test_rebase_base.sqlite")
+	theirs := tmpPath(t, "test_rebase_theirs.sqlite")
+	ours := tmpPath(t, "test_rebase_ours.sqlite")
+	conflict := tmpPath(t, "test_rebase_conflict.json")
 	defer os.Remove(base)
 	defer os.Remove(theirs)
 	defer os.Remove(ours)
@@ -620,10 +620,10 @@ func TestRebaseRoundTrip(t *testing.T) {
 // TestRebaseWithChanges tests rebase with changes on both sides (situation 3).
 // This tests the full rebase pipeline but relaxes the result check.
 func TestRebaseWithChanges(t *testing.T) {
-	base := tmpPath("test_rebase3_base.sqlite")
-	theirs := tmpPath("test_rebase3_theirs.sqlite")
-	ours := tmpPath("test_rebase3_ours.sqlite")
-	conflict := tmpPath("test_rebase3_conflict.json")
+	base := tmpPath(t, "test_rebase3_base.sqlite")
+	theirs := tmpPath(t, "test_rebase3_theirs.sqlite")
+	ours := tmpPath(t, "test_rebase3_ours.sqlite")
+	conflict := tmpPath(t, "test_rebase3_conflict.json")
 	defer os.Remove(base)
 	defer os.Remove(theirs)
 	defer os.Remove(ours)
@@ -676,12 +676,12 @@ func TestRebaseWithChanges(t *testing.T) {
 
 // TestCreateRebasedChangeset tests creating a rebased changeset with insert-only changes.
 func TestCreateRebasedChangeset(t *testing.T) {
-	base := tmpPath("test_crebas_base.sqlite")
-	modified := tmpPath("test_crebas_modified.sqlite")
-	their := tmpPath("test_crebas_their.sqlite")
-	diffBaseMod := tmpPath("test_crebas_base_mod.diff")
-	rebased := tmpPath("test_crebas_rebased.diff")
-	conflict := tmpPath("test_crebas_conflict.json")
+	base := tmpPath(t, "test_crebas_base.sqlite")
+	modified := tmpPath(t, "test_crebas_modified.sqlite")
+	their := tmpPath(t, "test_crebas_their.sqlite")
+	diffBaseMod := tmpPath(t, "test_crebas_base_mod.diff")
+	rebased := tmpPath(t, "test_crebas_rebased.diff")
+	conflict := tmpPath(t, "test_crebas_conflict.json")
 	defer os.Remove(base)
 	defer os.Remove(modified)
 	defer os.Remove(their)
@@ -721,7 +721,7 @@ func TestCreateRebasedChangeset(t *testing.T) {
 		db.Exec("INSERT INTO simple (name, value) VALUES ('their_added', 99)")
 		db.Close()
 	}
-	diffBaseTheir := tmpPath("test_crebas_base_their.diff")
+	diffBaseTheir := tmpPath(t, "test_crebas_base_their.diff")
 	defer os.Remove(diffBaseTheir)
 	if err := CreateChangeset(base, their, diffBaseTheir); err != nil {
 		t.Fatalf("CreateChangeset base→their failed: %v", err)
@@ -745,9 +745,9 @@ func TestCreateRebasedChangeset(t *testing.T) {
 
 // TestEmptyChangeset tests HasChanges and ChangesCount on an empty changeset.
 func TestEmptyChangeset(t *testing.T) {
-	base := tmpPath("test_empty_base.sqlite")
-	modified := tmpPath("test_empty_modified.sqlite")
-	diff := tmpPath("test_empty.diff")
+	base := tmpPath(t, "test_empty_base.sqlite")
+	modified := tmpPath(t, "test_empty_modified.sqlite")
+	diff := tmpPath(t, "test_empty.diff")
 	defer os.Remove(base)
 	defer os.Remove(modified)
 	defer os.Remove(diff)
@@ -871,7 +871,7 @@ func TestLogger(t *testing.T) {
 
 // TestFileUtilities tests the file utility functions.
 func TestFileUtilities(t *testing.T) {
-	tmpFile := tmpPath("test_file_utils.txt")
+	tmpFile := tmpPath(t, "test_file_utils.txt")
 	defer os.Remove(tmpFile)
 
 	// FileExists on non-existent file.
@@ -888,7 +888,7 @@ func TestFileUtilities(t *testing.T) {
 	}
 
 	// FileCopy.
-	dst := tmpPath("test_file_utils_copy.txt")
+	dst := tmpPath(t, "test_file_utils_copy.txt")
 	defer os.Remove(dst)
 	if err := FileCopy(dst, tmpFile); err != nil {
 		t.Fatalf("FileCopy failed: %v", err)
@@ -948,8 +948,8 @@ func TestRandomTmpFilename(t *testing.T) {
 
 // TestSchema tests the Schema function.
 func TestSchema(t *testing.T) {
-	base := tmpPath("test_schema_base.sqlite")
-	jsonFile := tmpPath("test_schema.json")
+	base := tmpPath(t, "test_schema_base.sqlite")
+	jsonFile := tmpPath(t, "test_schema.json")
 	defer os.Remove(base)
 	defer os.Remove(jsonFile)
 
@@ -977,9 +977,9 @@ func TestSchema(t *testing.T) {
 
 // TestDumpData tests the DumpData function end-to-end.
 func TestDumpData(t *testing.T) {
-	src := tmpPath("test_dump_src.sqlite")
-	dst := tmpPath("test_dump_dst.sqlite")
-	dump := tmpPath("test_dump.diff")
+	src := tmpPath(t, "test_dump_src.sqlite")
+	dst := tmpPath(t, "test_dump_dst.sqlite")
+	dump := tmpPath(t, "test_dump.diff")
 	defer os.Remove(src)
 	defer os.Remove(dst)
 	defer os.Remove(dump)

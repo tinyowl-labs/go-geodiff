@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestCreateChangesetRoundTrip(t *testing.T) {
 
 	// Test 1: Open with base and modified (identical files => empty changeset)
 	d := NewSqliteDriver()
-	err := d.Open(map[string]string{
+	err := d.Open(context.Background(), map[string]string{
 		"base":     tmpBase,
 		"modified": tmpModified,
 	})
@@ -61,7 +62,7 @@ func TestCreateChangesetRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter failed: %v", err)
 	}
-	if err := d.CreateChangeset(w); err != nil {
+	if err := d.CreateChangeset(context.Background(), w); err != nil {
 		w.Close()
 		t.Fatalf("CreateChangeset failed: %v", err)
 	}
@@ -98,13 +99,13 @@ func TestListTables_GPKG(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	err := d.Open(map[string]string{"base": tmp})
+	err := d.Open(context.Background(), map[string]string{"base": tmp})
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 	defer d.Close()
 
-	tables, err := d.ListTables(false)
+	tables, err := d.ListTables(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
@@ -129,13 +130,13 @@ func TestTableSchema_GPKG(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	err := d.Open(map[string]string{"base": tmp})
+	err := d.Open(context.Background(), map[string]string{"base": tmp})
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 	defer d.Close()
 
-	tables, err := d.ListTables(false)
+	tables, err := d.ListTables(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestTableSchema_GPKG(t *testing.T) {
 	}
 
 	for _, tableName := range tables {
-		schemaTbl, err := d.TableSchema(tableName, false)
+		schemaTbl, err := d.TableSchema(context.Background(), tableName, false)
 		if err != nil {
 			t.Fatalf("TableSchema(%s) failed: %v", tableName, err)
 		}
@@ -175,7 +176,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 
 	// 1. Open source and dump data
 	dSrc := NewSqliteDriver()
-	if err := dSrc.Open(map[string]string{"base": tmpSrc}); err != nil {
+	if err := dSrc.Open(context.Background(), map[string]string{"base": tmpSrc}); err != nil {
 		t.Fatalf("Open source failed: %v", err)
 	}
 
@@ -186,7 +187,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter failed: %v", err)
 	}
-	if err := dSrc.DumpData(w, false); err != nil {
+	if err := dSrc.DumpData(context.Background(), w, false); err != nil {
 		w.Close()
 		dSrc.Close()
 		t.Fatalf("DumpData failed: %v", err)
@@ -195,13 +196,13 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 
 	// Get schemas before closing
 	var schemas []*schema.TableSchema
-	tables, err := dSrc.ListTables(false)
+	tables, err := dSrc.ListTables(context.Background(), false)
 	if err != nil {
 		dSrc.Close()
 		t.Fatalf("ListTables failed: %v", err)
 	}
 	for _, tableName := range tables {
-		ts, err := dSrc.TableSchema(tableName, false)
+		ts, err := dSrc.TableSchema(context.Background(), tableName, false)
 		if err != nil {
 			dSrc.Close()
 			t.Fatalf("TableSchema failed: %v", err)
@@ -215,12 +216,12 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 	defer os.Remove(tmpDst)
 
 	dDst := NewSqliteDriver()
-	if err := dDst.Create(map[string]string{"base": tmpDst}, true); err != nil {
+	if err := dDst.Create(context.Background(), map[string]string{"base": tmpDst}, true); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
 	// 3. Create tables
-	if err := dDst.CreateTables(schemas); err != nil {
+	if err := dDst.CreateTables(context.Background(), schemas); err != nil {
 		dDst.Close()
 		t.Fatalf("CreateTables failed: %v", err)
 	}
@@ -231,7 +232,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 		dDst.Close()
 		t.Fatalf("NewReader failed: %v", err)
 	}
-	if err := dDst.ApplyChangeset(r); err != nil {
+	if err := dDst.ApplyChangeset(context.Background(), r); err != nil {
 		r.Close()
 		dDst.Close()
 		t.Fatalf("ApplyChangeset failed: %v", err)
@@ -239,7 +240,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 	r.Close()
 
 	// 5. Verify table count matches
-	dstTables, err := dDst.ListTables(false)
+	dstTables, err := dDst.ListTables(context.Background(), false)
 	if err != nil {
 		dDst.Close()
 		t.Fatalf("ListTables on dest failed: %v", err)
@@ -267,7 +268,7 @@ func TestCreateChangeset_IdenticalFiles(t *testing.T) {
 	defer os.Remove(tmpModified)
 
 	d := NewSqliteDriver()
-	if err := d.Open(map[string]string{"base": tmpBase, "modified": tmpModified}); err != nil {
+	if err := d.Open(context.Background(), map[string]string{"base": tmpBase, "modified": tmpModified}); err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 	defer d.Close()
@@ -280,7 +281,7 @@ func TestCreateChangeset_IdenticalFiles(t *testing.T) {
 		t.Fatalf("NewWriter failed: %v", err)
 	}
 
-	if err := d.CreateChangeset(w); err != nil {
+	if err := d.CreateChangeset(context.Background(), w); err != nil {
 		w.Close()
 		t.Fatalf("CreateChangeset failed: %v", err)
 	}
@@ -323,18 +324,18 @@ func TestTableSchema_HasPrimaryKey(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	if err := d.Open(map[string]string{"base": tmp}); err != nil {
+	if err := d.Open(context.Background(), map[string]string{"base": tmp}); err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 	defer d.Close()
 
-	tables, err := d.ListTables(false)
+	tables, err := d.ListTables(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
 
 	for _, tableName := range tables {
-		ts, err := d.TableSchema(tableName, false)
+		ts, err := d.TableSchema(context.Background(), tableName, false)
 		if err != nil {
 			t.Fatalf("TableSchema(%s) failed: %v", tableName, err)
 		}
@@ -360,7 +361,7 @@ func TestTableSchema_HasPrimaryKey(t *testing.T) {
 // TestOpen_NonexistentFile returns an error.
 func TestOpen_NonexistentFile(t *testing.T) {
 	d := NewSqliteDriver()
-	err := d.Open(map[string]string{"base": "/nonexistent/path/file.gpkg"})
+	err := d.Open(context.Background(), map[string]string{"base": "/nonexistent/path/file.gpkg"})
 	if err == nil {
 		d.Close()
 		t.Error("Expected error opening nonexistent file, got nil")
@@ -370,7 +371,7 @@ func TestOpen_NonexistentFile(t *testing.T) {
 // TestOpen_MissingBaseKey returns an error.
 func TestOpen_MissingBaseKey(t *testing.T) {
 	d := NewSqliteDriver()
-	err := d.Open(map[string]string{})
+	err := d.Open(context.Background(), map[string]string{})
 	if err == nil {
 		t.Error("Expected error for missing 'base' key, got nil")
 	}
@@ -382,7 +383,7 @@ func TestCreate_NewDatabase(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	if err := d.Create(map[string]string{"base": tmp}, true); err != nil {
+	if err := d.Create(context.Background(), map[string]string{"base": tmp}, true); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 	if err := d.Close(); err != nil {
@@ -405,7 +406,7 @@ func TestCreate_AlreadyExists(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	err := d.Create(map[string]string{"base": tmp}, false)
+	err := d.Create(context.Background(), map[string]string{"base": tmp}, false)
 	if err == nil {
 		d.Close()
 		t.Error("Expected error creating database that already exists, got nil")

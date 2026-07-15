@@ -57,11 +57,57 @@ No system dependencies. Single binary.
 ## Testing
 
 ```bash
-# Run all tests (162 tests, ~0.1s)
+# Run all tests
 go test ./...
+
+# With race detector
+go test -race ./...
 
 # Cross-validate against C++ geodiff binary
 GEODIFF_CPP_BIN=/path/to/geodiff go test ./crossval/ -v
+```
+
+## Performance
+
+Pure Go, zero CGo. Benchmarked on Intel i7-12700KF (20 threads):
+
+### High-level operations
+
+| Operation | ns/op | allocs |
+|-----------|------:|-------:|
+| `CreateChangeset` (identical, 1 table) | 869,000 | 601 |
+| `Schema` export | 486,000 | 283 |
+| `DumpData` | 493,000 | 317 |
+| `MakeCopy` (SQLite backup) | 1,517,000 | 961 |
+
+### Changeset format
+
+| Operation | ns/op | allocs |
+|-----------|------:|-------:|
+| `Reader` — 10,000 INSERTs | 836,000 | 30,002 |
+| `Writer` — 1,000 INSERTs | 1,475,000 | 10 |
+| `Concat` — 500 + 500 entries | 1,084,000 | 6,838 |
+| `Varint` encode | 22 | 0 |
+| `Varint` decode | 17 | 0 |
+
+### Go vs C++
+
+go-geodiff is **2.8× faster** than the Qt-based C++ `geodiff` CLI for changeset creation:
+
+```bash
+GEODIFF_CPP_BIN=/path/to/geodiff go test ./crossval/ -bench=GoVsCPP -benchtime=3s
+```
+
+| | Go | C++ |
+|---|---:|---:|
+| `CreateChangeset` | **869 μs** | 2,452 μs |
+
+To run all benchmarks:
+
+```bash
+go test ./crossval/ -bench=. -benchtime=3s
+go test ./changeset/ -bench=. -benchtime=1s
+go test ./varint/ -bench=. -benchtime=1s
 ```
 
 ## License

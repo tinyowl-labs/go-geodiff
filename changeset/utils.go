@@ -59,13 +59,17 @@ func valueToJSON(v Value) (interface{}, bool) {
 	case TypeNull:
 		return nil, true
 	case TypeInt:
-		return v.AsInt(), true
+		n, _ := v.AsInt()
+		return n, true
 	case TypeDouble:
-		return v.AsDouble(), true
+		f, _ := v.AsDouble()
+		return f, true
 	case TypeText:
-		return v.AsText(), true
+		s, _ := v.AsText()
+		return s, true
 	case TypeBlob:
-		return base64.StdEncoding.EncodeToString(v.AsBlob()), true
+		b, _ := v.AsBlob()
+		return base64.StdEncoding.EncodeToString(b), true
 	default:
 		return "(unknown)", true
 	}
@@ -278,7 +282,7 @@ func InvertChangeset(reader *Reader, writer *Writer) error {
 
 		tableName := entry.Table.Name
 		if tableName != currentTableName {
-			if err := writer.BeginTable(*entry.Table); err != nil {
+			if err := writer.BeginTable(entry.Table); err != nil {
 				return err
 			}
 			currentTableName = tableName

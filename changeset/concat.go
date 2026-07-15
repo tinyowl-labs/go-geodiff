@@ -35,16 +35,20 @@ func pkKey(entry *ChangesetEntry) string {
 		switch v.Type() {
 		case TypeInt:
 			sb.WriteString("I:")
-			sb.WriteString(strconv.FormatInt(v.AsInt(), 10))
+			n, _ := v.AsInt()
+			sb.WriteString(strconv.FormatInt(n, 10))
 		case TypeDouble:
 			sb.WriteString("D:")
-			sb.WriteString(strconv.FormatFloat(v.AsDouble(), 'g', -1, 64))
+			f, _ := v.AsDouble()
+			sb.WriteString(strconv.FormatFloat(f, 'g', -1, 64))
 		case TypeText:
 			sb.WriteString("T:")
-			sb.WriteString(v.AsText())
+			s, _ := v.AsText()
+			sb.WriteString(s)
 		case TypeBlob:
 			sb.WriteString("B:")
-			sb.WriteString(BinToHex(v.AsBlob()))
+			b, _ := v.AsBlob()
+			sb.WriteString(BinToHex(b))
 		case TypeNull:
 			sb.WriteString("N")
 		case TypeUndefined:
@@ -76,7 +80,7 @@ func mergeValue(vOne, vTwo Value) Value {
 //	valuesOld2, valuesNew2 — the second update's old/new (may be nil for DELETE→INSERT)
 //	outputOld, outputNew   — output slices (appended to)
 func mergeUpdate(
-	t *ChangesetTable,
+	t ChangesetTable,
 	valuesOld1, valuesOld2 []Value,
 	valuesNew1, valuesNew2 []Value,
 	outputOld, outputNew *[]Value,
@@ -201,8 +205,8 @@ func mergeEntriesForRow(e1, e2 *ChangesetEntry) mergeResult {
 
 // concatTable holds the accumulated entries for one table during concatenation.
 type concatTable struct {
-	table   *ChangesetTable            // owned copy of table schema
-	entries map[string]*ChangesetEntry // PK key → entry (owned, heap-allocated sense)
+	table   ChangesetTable             // owned copy of table schema
+	entries map[string]*ChangesetEntry // PK key → entry (owned)
 }
 
 // ----- ConcatChangesets -----
@@ -236,7 +240,7 @@ func ConcatChangesets(inputFiles []string, outputFile string) error {
 			if !ok {
 				// First time seeing this table — create a fresh accumulator.
 				ct = &concatTable{
-					table:   entry.Table.Clone(),
+					table:   entry.Table,
 					entries: make(map[string]*ChangesetEntry),
 				}
 				result[tableName] = ct
@@ -281,7 +285,7 @@ func ConcatChangesets(inputFiles []string, outputFile string) error {
 		if len(ct.entries) == 0 {
 			continue
 		}
-		if err := writer.BeginTable(*ct.table); err != nil {
+		if err := writer.BeginTable(ct.table); err != nil {
 			writer.Close()
 			return err
 		}

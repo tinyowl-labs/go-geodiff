@@ -44,8 +44,8 @@ const (
 	BaseDatetime BaseType = 7
 )
 
-// baseTypeToString returns a human-readable string for the base type.
-func baseTypeToString(t BaseType) string {
+// BaseTypeString returns a human-readable string for the base type.
+func BaseTypeString(t BaseType) string {
 	switch t {
 	case BaseText:
 		return "text"
