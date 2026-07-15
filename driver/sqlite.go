@@ -41,10 +41,39 @@ const (
 	ApplyNoChange
 )
 
+// ConnInfo holds database connection parameters for the SQLite driver.
+type ConnInfo struct {
+	Base     string // Path to base database (required)
+	Modified string // Path to modified database (optional, for diff operations)
+}
+
+// toMap converts ConnInfo to a map for backward compatibility.
+func (c ConnInfo) toMap() map[string]string {
+	m := map[string]string{"base": c.Base}
+	if c.Modified != "" {
+		m["modified"] = c.Modified
+	}
+	return m
+}
+
+// tableWriter tracks whether BeginTable has been called for a changeset writer.
+type tableWriter struct {
+	w     *changeset.Writer
+	first bool
+}
+
+func (tw *tableWriter) beginTableIfNeeded(table changeset.ChangesetTable) error {
+	if !tw.first {
+		return nil
+	}
+	tw.first = false
+	return tw.w.BeginTable(table)
+}
+
 // Connector manages database connection lifecycle.
 type Connector interface {
-	Open(ctx context.Context, conn map[string]string) error
-	Create(ctx context.Context, conn map[string]string, overwrite bool) error
+	Open(ctx context.Context, conn ConnInfo) error
+	Create(ctx context.Context, conn ConnInfo, overwrite bool) error
 	Close() error
 }
 
@@ -100,18 +129,18 @@ func (d *SqliteDriver) databaseName(side Side) (string, error) {
 }
 
 // Open opens a SQLite database and optionally attaches a second as "aux".
-func (d *SqliteDriver) Open(ctx context.Context, conn map[string]string) error {
+func (d *SqliteDriver) Open(ctx context.Context, conn ConnInfo) error {
 	_ = ctx
-	base, ok := conn["base"]
-	if !ok {
+	base := conn.Base
+	if base == "" {
 		return fmt.Errorf("missing 'base' file")
 	}
 	if !fileExistsCheck(base) {
 		return fmt.Errorf("missing 'base' file when opening sqlite driver: %s", base)
 	}
 
-	modified, hasModified := conn["modified"]
-	d.hasModified = hasModified
+	modified := conn.Modified
+	d.hasModified = modified != ""
 
 	var dbPath string
 	if d.hasModified {
@@ -145,10 +174,10 @@ func (d *SqliteDriver) Open(ctx context.Context, conn map[string]string) error {
 }
 
 // Create creates a new SQLite database file.
-func (d *SqliteDriver) Create(ctx context.Context, conn map[string]string, overwrite bool) error {
+func (d *SqliteDriver) Create(ctx context.Context, conn ConnInfo, overwrite bool) error {
 	_ = ctx
-	base, ok := conn["base"]
-	if !ok {
+	base := conn.Base
+	if base == "" {
 		return fmt.Errorf("missing 'base' file")
 	}
 	if overwrite {
@@ -457,7 +486,7 @@ func scanRowValues(rows *sql.Rows, numColumns int) ([]changeset.Value, error) {
 }
 
 func handleInserted(db *sql.DB, tableName string, tbl *schema.TableSchema, reverse bool,
-	writer *changeset.Writer, first *bool) error {
+	tw *tableWriter) error {
 
 	sqlStr := sqlFindInserted(tableName, tbl, reverse)
 	rows, err := db.QueryContext(context.Background(), sqlStr)
@@ -472,11 +501,8 @@ func handleInserted(db *sql.DB, tableName string, tbl *schema.TableSchema, rever
 	}
 
 	for rows.Next() {
-		if *first {
-			if err := writer.BeginTable(schemaToChangesetTable(tableName, tbl)); err != nil {
-				return err
-			}
-			*first = false
+		if err := tw.beginTableIfNeeded(schemaToChangesetTable(tableName, tbl)); err != nil {
+			return err
 		}
 		vals, err := scanRowValues(rows, len(cols))
 		if err != nil {
@@ -490,7 +516,7 @@ func handleInserted(db *sql.DB, tableName string, tbl *schema.TableSchema, rever
 			entry.Op = changeset.OpInsert
 			entry.NewValues = vals
 		}
-		if err := writer.WriteEntry(entry); err != nil {
+		if err := tw.w.WriteEntry(entry); err != nil {
 			return err
 		}
 	}
@@ -526,7 +552,7 @@ func checkDatetimeDiff(db *sql.DB, v1, v2 changeset.Value) bool {
 }
 
 func handleUpdated(db *sql.DB, tableName string, tbl *schema.TableSchema,
-	writer *changeset.Writer, first *bool) error {
+	tw *tableWriter) error {
 
 	sqlStr := sqlFindModified(tableName, tbl)
 	rows, err := db.QueryContext(context.Background(), sqlStr)
@@ -575,13 +601,10 @@ func handleUpdated(db *sql.DB, tableName string, tbl *schema.TableSchema,
 		}
 
 		if hasUpdates {
-			if *first {
-				if err := writer.BeginTable(schemaToChangesetTable(tableName, tbl)); err != nil {
-					return err
-				}
-				*first = false
+			if err := tw.beginTableIfNeeded(schemaToChangesetTable(tableName, tbl)); err != nil {
+				return err
 			}
-			if err := writer.WriteEntry(entry); err != nil {
+			if err := tw.w.WriteEntry(entry); err != nil {
 				return err
 			}
 		}
@@ -622,14 +645,14 @@ func (d *SqliteDriver) CreateChangeset(ctx context.Context, writer *changeset.Wr
 		if !tbl.HasPrimaryKey() {
 			continue
 		}
-		first := true
-		if err := handleInserted(d.db, tableName, tbl, false, writer, &first); err != nil {
+		tw := &tableWriter{w: writer, first: true}
+		if err := handleInserted(d.db, tableName, tbl, false, tw); err != nil {
 			return err
 		}
-		if err := handleInserted(d.db, tableName, tbl, true, writer, &first); err != nil {
+		if err := handleInserted(d.db, tableName, tbl, true, tw); err != nil {
 			return err
 		}
-		if err := handleUpdated(d.db, tableName, tbl, writer, &first); err != nil {
+		if err := handleUpdated(d.db, tableName, tbl, tw); err != nil {
 			return err
 		}
 	}
@@ -897,7 +920,8 @@ func (d *SqliteDriver) ApplyChangeset(ctx context.Context, reader *changeset.Rea
 		case ApplyApplied, ApplySkipped:
 		case ApplyConstraintConflict:
 			if _, ok := tableCopies[entry.Table.Name]; !ok {
-				tableCopies[entry.Table.Name] = entry.Table.Clone()
+				t := entry.Table
+				tableCopies[entry.Table.Name] = &t
 			}
 			cloned := *entry.Clone()
 			cloned.Table = *tableCopies[entry.Table.Name]
@@ -1138,26 +1162,23 @@ func (d *SqliteDriver) DumpData(ctx context.Context, writer *changeset.Writer, s
 		if !tbl.HasPrimaryKey() {
 			continue
 		}
-		first := true
+		tw := &tableWriter{w: writer, first: true}
 		query := fmt.Sprintf("SELECT * FROM \"%s\".%s", dbName, quoteIdent(tableName))
 		rows, err := d.db.QueryContext(ctx, query)
 		if err != nil {
 			return fmt.Errorf("failure dumping changeset: %w", err)
 		}
 		for rows.Next() {
-			if first {
-				if err := writer.BeginTable(schemaToChangesetTable(tableName, tbl)); err != nil {
-					rows.Close()
-					return err
-				}
-				first = false
+			if err := tw.beginTableIfNeeded(schemaToChangesetTable(tableName, tbl)); err != nil {
+				rows.Close()
+				return err
 			}
 			vals, err := scanRowValues(rows, len(tbl.Columns))
 			if err != nil {
 				rows.Close()
 				return fmt.Errorf("failure dumping changeset: %w", err)
 			}
-			if err := writer.WriteEntry(changeset.ChangesetEntry{
+			if err := tw.w.WriteEntry(changeset.ChangesetEntry{
 				Op:        changeset.OpInsert,
 				NewValues: vals,
 			}); err != nil {
@@ -1177,3 +1198,5 @@ func fileExistsCheck(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+var _ Driver = (*SqliteDriver)(nil)

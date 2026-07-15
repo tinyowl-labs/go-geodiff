@@ -851,9 +851,6 @@ func TestNewContext(t *testing.T) {
 	if ctx.Logger() == nil {
 		t.Error("default logger should not be nil")
 	}
-	if ctx.LastError() != "" {
-		t.Errorf("initial lastError should be empty, got %q", ctx.LastError())
-	}
 }
 
 // TestLogger tests the default logger creation.

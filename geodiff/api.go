@@ -10,6 +10,7 @@ package geodiff
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,14 +45,12 @@ func createChangesetEx(gctx *Context, driverName string, driverExtraInfo map[str
 	}
 
 	drv := newDriver(gctx, driverName)
-	conn := map[string]string{
-		"base":     base,
-		"modified": modified,
+	conn := driver.ConnInfo{
+		Base:     base,
+		Modified: modified,
 	}
 
-	for k, v := range driverExtraInfo {
-		conn[k] = v
-	}
+	_ = driverExtraInfo // reserved for future use
 	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(gctx, "Unable to open databases for createChangeset", err)
 	}
@@ -86,10 +85,8 @@ func applyChangesetEx(ctx *Context, driverName string, driverExtraInfo map[strin
 	}
 
 	drv := newDriver(ctx, driverName)
-	conn := map[string]string{"base": base}
-	for k, v := range driverExtraInfo {
-		conn[k] = v
-	}
+	conn := driver.ConnInfo{Base: base}
+	_ = driverExtraInfo // reserved for future use
 	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(ctx, "Unable to open database for applyChangeset", err)
 	}
@@ -109,7 +106,7 @@ func applyChangesetEx(ctx *Context, driverName string, driverExtraInfo map[strin
 	err = drv.ApplyChangeset(context.Background(), reader)
 	if err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "conflicts") || strings.Contains(msg, "constraint") {
+		if errors.Is(err, ErrConflict) || strings.Contains(msg, "constraint") {
 			return &GeoDiffError{Code: Conflicts, Msg: msg}
 		}
 		return wrapError(ctx, "Failed to apply changeset", err)
@@ -476,10 +473,8 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 
 	// Cross-driver copy: dump src to changeset, create dst, apply.
 	srcDriver := newDriver(ctx, driverSrc)
-	srcConn := map[string]string{"base": src}
-	if extraInfo != "" {
-		srcConn["conninfo"] = extraInfo
-	}
+	srcConn := driver.ConnInfo{Base: src}
+	_ = extraInfo // reserved for future use
 	if err := srcDriver.Open(context.Background(), srcConn); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
@@ -514,10 +509,8 @@ func MakeCopy(driverSrc, extraInfo, src, driverDst, extraInfoDst, dst string) er
 	w.Close()
 
 	dstDriver := newDriver(ctx, driverDst)
-	dstConn := map[string]string{"base": dst}
-	if extraInfoDst != "" {
-		dstConn["conninfo"] = extraInfoDst
-	}
+	dstConn := driver.ConnInfo{Base: dst}
+	_ = extraInfoDst // reserved for future use
 	if err := dstDriver.Create(context.Background(), dstConn, true); err != nil {
 		return wrapDriverError(ctx, "Cannot create destination database", err)
 	}
@@ -561,7 +554,7 @@ func MakeCopySqlite(src, dst string) error {
 
 	// Use sqlite3 backup approach: open source, create/open dest, dump+apply.
 	srcDriver := driver.NewSqliteDriver()
-	if err := srcDriver.Open(context.Background(), map[string]string{"base": src}); err != nil {
+	if err := srcDriver.Open(context.Background(), driver.ConnInfo{Base: src}); err != nil {
 		return wrapError(ctx, "makeCopySqlite: Unable to open source database: "+src, err)
 	}
 	defer srcDriver.Close()
@@ -594,8 +587,7 @@ func MakeCopySqlite(src, dst string) error {
 	w.Close()
 
 	dstDriver := driver.NewSqliteDriver()
-	if err := dstDriver.Create(context.Background(), map[string]string{"base": dst}, true); err != nil {
-		ctx.setAndLogError("makeCopySqlite: Unable to open destination database: " + dst + "\n" + err.Error())
+	if err := dstDriver.Create(context.Background(), driver.ConnInfo{Base: dst}, true); err != nil {
 		return NewGeoDiffError("makeCopySqlite: Unable to open destination database: " + dst)
 	}
 	defer dstDriver.Close()
@@ -629,10 +621,8 @@ func DumpData(driverName, extraInfo, src, changesetPath string) error {
 	}
 
 	drv := newDriver(ctx, driverName)
-	conn := map[string]string{"base": src}
-	if extraInfo != "" {
-		conn["conninfo"] = extraInfo
-	}
+	conn := driver.ConnInfo{Base: src}
+	_ = extraInfo // reserved for future use
 	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
@@ -664,7 +654,7 @@ func CreateInitialDiff(src, changesetPath string) error {
 	}
 
 	drv := newDriver(ctx, "sqlite")
-	if err := drv.Open(context.Background(), map[string]string{"base": src}); err != nil {
+	if err := drv.Open(context.Background(), driver.ConnInfo{Base: src}); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
 	defer drv.Close()
@@ -689,7 +679,7 @@ func CreateInitialDiff(src, changesetPath string) error {
 	emptyPath := changesetPath + ".empty.gpkg"
 	defer os.Remove(emptyPath)
 
-	if err := emptyDrv.Create(context.Background(), map[string]string{"base": emptyPath}, true); err != nil {
+	if err := emptyDrv.Create(context.Background(), driver.ConnInfo{Base: emptyPath}, true); err != nil {
 		return wrapError(ctx, "Failed to create empty database", err)
 	}
 	if err := emptyDrv.CreateTables(context.Background(), schemas); err != nil {
@@ -715,10 +705,8 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 	}
 
 	drv := newDriver(ctx, driverName)
-	conn := map[string]string{"base": src}
-	if extraInfo != "" {
-		conn["conninfo"] = extraInfo
-	}
+	conn := driver.ConnInfo{Base: src}
+	_ = extraInfo // reserved for future use
 	if err := drv.Open(context.Background(), conn); err != nil {
 		return wrapDriverError(ctx, "Cannot open source database", err)
 	}
@@ -830,7 +818,7 @@ func CreateRebasedChangeset(base, modified, base2their, rebased, conflictFile st
 
 	// Verify we can open the database.
 	drv := driver.NewSqliteDriver()
-	if err := drv.Open(context.Background(), map[string]string{"base": modified}); err != nil {
+	if err := drv.Open(context.Background(), driver.ConnInfo{Base: modified}); err != nil {
 		drv.Close()
 		return wrapDriverError(ctx, "Unable to open database for rebase validation", err)
 	}
@@ -1094,7 +1082,6 @@ func wrapError(ctx *Context, contextMsg string, err error) error {
 		return nil
 	}
 	msg := contextMsg + ": " + err.Error()
-	ctx.setAndLogError(msg)
 	return NewGeoDiffError(msg)
 }
 
@@ -1104,7 +1091,6 @@ func wrapDriverError(ctx *Context, contextMsg string, err error) error {
 		return nil
 	}
 	msg := contextMsg + ": " + err.Error()
-	ctx.setAndLogError(msg)
 
 	if ge, ok := err.(*GeoDiffError); ok {
 		return ge

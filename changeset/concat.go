@@ -215,6 +215,10 @@ type concatTable struct {
 // file.  When the resulting changeset is applied, the effect is the same as
 // applying the input files sequentially.  Incompatible changes that cannot
 // be resolved are discarded.
+//
+// NOTE: This function buffers all entries in memory before writing the output.
+// For very large changesets with many entries, this may require significant
+// memory.
 func ConcatChangesets(inputFiles []string, outputFile string) error {
 	// table name → concatTable
 	result := make(map[string]*concatTable)
@@ -245,16 +249,24 @@ func ConcatChangesets(inputFiles []string, outputFile string) error {
 				}
 				result[tableName] = ct
 
-				e := entry.Clone()
-				e.Table = ct.table
+				e := &ChangesetEntry{
+					Op:    entry.Op,
+					Table: ct.table,
+				}
+				e.OldValues = append(e.OldValues, entry.OldValues...)
+				e.NewValues = append(e.NewValues, entry.NewValues...)
 				ct.entries[pkKey(entry)] = e
 			} else {
 				key := pkKey(entry)
 				existing, found := ct.entries[key]
 				if !found {
 					// New PK for this table — just record it.
-					e := entry.Clone()
-					e.Table = ct.table
+					e := &ChangesetEntry{
+						Op:    entry.Op,
+						Table: ct.table,
+					}
+					e.OldValues = append(e.OldValues, entry.OldValues...)
+					e.NewValues = append(e.NewValues, entry.NewValues...)
 					ct.entries[key] = e
 				} else {
 					// Merge the new entry into the existing one.

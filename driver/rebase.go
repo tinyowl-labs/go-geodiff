@@ -680,70 +680,12 @@ func InvertChangeset(inputPath, outputPath string) error {
 		return fmt.Errorf("InvertChangeset: %w", err)
 	}
 	defer reader.Close()
-
 	writer, err := changeset.NewWriter(outputPath)
 	if err != nil {
 		return fmt.Errorf("InvertChangeset: %w", err)
 	}
 	defer writer.Close()
-
-	var currentTable *changeset.ChangesetTable
-
-	for {
-		entry, err := reader.NextEntry()
-		if err != nil {
-			return fmt.Errorf("InvertChangeset: %w", err)
-		}
-		if entry == nil {
-			break
-		}
-
-		if currentTable == nil || currentTable.Name != entry.Table.Name {
-			if err := writer.BeginTable(entry.Table); err != nil {
-				return fmt.Errorf("InvertChangeset: beginTable: %w", err)
-			}
-			currentTable = &entry.Table
-		}
-
-		numColumns := entry.Table.ColumnCount()
-		var out changeset.ChangesetEntry
-
-		switch entry.Op {
-		case changeset.OpInsert:
-			out.Op = changeset.OpDelete
-			out.OldValues = make([]changeset.Value, numColumns)
-			copy(out.OldValues, entry.NewValues)
-
-		case changeset.OpDelete:
-			out.Op = changeset.OpInsert
-			out.NewValues = make([]changeset.Value, numColumns)
-			copy(out.NewValues, entry.OldValues)
-
-		case changeset.OpUpdate:
-			out.Op = changeset.OpUpdate
-			out.NewValues = make([]changeset.Value, numColumns)
-			copy(out.NewValues, entry.OldValues)
-			out.OldValues = make([]changeset.Value, numColumns)
-			copy(out.OldValues, entry.NewValues)
-
-			// Fix PK columns: if old is undefined (PK), copy from new and set new to undefined
-			for i, isPK := range entry.Table.PrimaryKeys {
-				if isPK && out.OldValues[i].IsUndefined() {
-					out.OldValues[i] = out.NewValues[i]
-					out.NewValues[i] = changeset.NewValueUndefined()
-				}
-			}
-
-		default:
-			return fmt.Errorf("InvertChangeset: unknown operation %s", entry.Op)
-		}
-
-		if err := writer.WriteEntry(out); err != nil {
-			return fmt.Errorf("InvertChangeset: writeEntry: %w", err)
-		}
-	}
-
-	return nil
+	return changeset.InvertChangeset(reader, writer)
 }
 
 // ---------------------------------------------------------------------------
@@ -784,7 +726,7 @@ func RebaseDirect(
 
 	// 1a. Create BASE→OURS changeset
 	d1 := NewSqliteDriver()
-	if err := d1.Open(context.Background(), map[string]string{"base": base, "modified": ours}); err != nil {
+	if err := d1.Open(context.Background(), ConnInfo{Base: base, Modified: ours}); err != nil {
 		return fmt.Errorf("RebaseDirect: open base→ours: %w", err)
 	}
 	w1, err := changeset.NewWriter(baseOurs)
@@ -815,7 +757,7 @@ func RebaseDirect(
 			return fmt.Errorf("RebaseDirect: open inverted changeset: %w", err)
 		}
 		dApply := NewSqliteDriver()
-		if err := dApply.Open(context.Background(), map[string]string{"base": ours}); err != nil {
+		if err := dApply.Open(context.Background(), ConnInfo{Base: ours}); err != nil {
 			rInv.Close()
 			return fmt.Errorf("RebaseDirect: open ours for undo: %w", err)
 		}
@@ -832,7 +774,7 @@ func RebaseDirect(
 
 	// 2a. Create BASE→THEIRS changeset
 	d2 := NewSqliteDriver()
-	if err := d2.Open(context.Background(), map[string]string{"base": base, "modified": theirs}); err != nil {
+	if err := d2.Open(context.Background(), ConnInfo{Base: base, Modified: theirs}); err != nil {
 		return fmt.Errorf("RebaseDirect: open base→theirs: %w", err)
 	}
 	w2, err := changeset.NewWriter(baseTheirs)
@@ -857,7 +799,7 @@ func RebaseDirect(
 			return fmt.Errorf("RebaseDirect: open theirs changeset: %w", err)
 		}
 		dApply2 := NewSqliteDriver()
-		if err := dApply2.Open(context.Background(), map[string]string{"base": ours}); err != nil {
+		if err := dApply2.Open(context.Background(), ConnInfo{Base: ours}); err != nil {
 			rTheirs.Close()
 			return fmt.Errorf("RebaseDirect: open ours for theirs apply: %w", err)
 		}
@@ -886,7 +828,7 @@ func RebaseDirect(
 				return fmt.Errorf("RebaseDirect: open merged changeset: %w", err)
 			}
 			dApply3 := NewSqliteDriver()
-			if err := dApply3.Open(context.Background(), map[string]string{"base": ours}); err != nil {
+			if err := dApply3.Open(context.Background(), ConnInfo{Base: ours}); err != nil {
 				rMerged.Close()
 				return fmt.Errorf("RebaseDirect: open ours for merged apply: %w", err)
 			}

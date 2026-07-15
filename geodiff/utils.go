@@ -8,6 +8,7 @@
 package geodiff
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -44,6 +45,17 @@ func NewGeoDiffError(msg string) *GeoDiffError {
 // NewConflictError creates a GeoDiffError with Code=Conflicts.
 func NewConflictError(msg string) *GeoDiffError {
 	return &GeoDiffError{Code: Conflicts, Msg: msg}
+}
+
+// ErrConflict is a sentinel error used for matching conflict errors.
+var ErrConflict = errors.New("conflicts encountered")
+
+// Is implements the errors.Is interface for GeoDiffError.
+func (e *GeoDiffError) Is(target error) bool {
+	if t, ok := target.(*GeoDiffError); ok {
+		return e.Code == t.Code
+	}
+	return false
 }
 
 // FileExists reports whether the file at path exists (never throws).

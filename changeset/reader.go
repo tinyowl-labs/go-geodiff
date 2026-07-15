@@ -10,6 +10,7 @@ package changeset
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"os"
 
@@ -37,6 +38,15 @@ type Reader struct {
 // NewReader opens a changeset file and loads its contents into memory.
 func NewReader(filename string) (*Reader, error) {
 	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("changeset reader: %w", err)
+	}
+	return &Reader{buf: data}, nil
+}
+
+// NewReaderFromReader creates a Reader from an io.Reader by reading all data into memory.
+func NewReaderFromReader(r io.Reader) (*Reader, error) {
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("changeset reader: %w", err)
 	}

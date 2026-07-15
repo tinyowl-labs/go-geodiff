@@ -10,6 +10,7 @@ package changeset
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"os"
 
@@ -27,7 +28,8 @@ import (
 //	}
 //	w.Close()
 type Writer struct {
-	file *os.File
+	w    io.Writer // destination (if set, used instead of file)
+	file *os.File  // file destination (set by NewWriter)
 
 	currentTable ChangesetTable // currently processed table
 	tmp          [varint.MaxVarintLen]byte
@@ -40,6 +42,11 @@ func NewWriter(filename string) (*Writer, error) {
 		return nil, fmt.Errorf("changeset writer: %w", err)
 	}
 	return &Writer{file: f}, nil
+}
+
+// NewWriterToWriter creates a Writer that writes to an io.Writer.
+func NewWriterToWriter(w io.Writer) *Writer {
+	return &Writer{w: w}
 }
 
 // BeginTable writes the table header. All subsequent calls to WriteEntry
@@ -91,29 +98,42 @@ func (w *Writer) WriteEntry(entry ChangesetEntry) error {
 	return nil
 }
 
-// Close flushes and closes the underlying file.
+// Close flushes and closes the underlying file. If the writer was created
+// with NewWriterToWriter, Close is a no-op and returns nil.
 func (w *Writer) Close() error {
-	return w.file.Close()
+	if w.file != nil {
+		return w.file.Close()
+	}
+	return nil
 }
 
 // --- private write helpers ---
 
+// writer returns the destination writer, preferring the io.Writer
+// set by NewWriterToWriter and falling back to the file.
+func (w *Writer) writer() io.Writer {
+	if w.w != nil {
+		return w.w
+	}
+	return w.file
+}
+
 func (w *Writer) writeByte(c byte) error {
-	_, err := w.file.Write([]byte{c})
+	_, err := w.writer().Write([]byte{c})
 	return err
 }
 
 func (w *Writer) writeVarint(n int) error {
 	nBytes := varint.PutVarint(w.tmp[:], uint32(n))
-	_, err := w.file.Write(w.tmp[:nBytes])
+	_, err := w.writer().Write(w.tmp[:nBytes])
 	return err
 }
 
 func (w *Writer) writeNullTerminatedString(s string) error {
-	if _, err := w.file.Write([]byte(s)); err != nil {
+	if _, err := w.writer().Write([]byte(s)); err != nil {
 		return err
 	}
-	_, err := w.file.Write([]byte{0})
+	_, err := w.writer().Write([]byte{0})
 	return err
 }
 
@@ -132,14 +152,14 @@ func (w *Writer) writeRowValues(values []Value) error {
 		case TypeInt: // 0x01
 			n, _ := values[i].AsInt()
 			binary.BigEndian.PutUint64(w.tmp[:8], uint64(n))
-			if _, err := w.file.Write(w.tmp[:8]); err != nil {
+			if _, err := w.writer().Write(w.tmp[:8]); err != nil {
 				return err
 			}
 
 		case TypeDouble: // 0x02
 			f, _ := values[i].AsDouble()
 			binary.BigEndian.PutUint64(w.tmp[:8], math.Float64bits(f))
-			if _, err := w.file.Write(w.tmp[:8]); err != nil {
+			if _, err := w.writer().Write(w.tmp[:8]); err != nil {
 				return err
 			}
 
@@ -148,7 +168,7 @@ func (w *Writer) writeRowValues(values []Value) error {
 			if err := w.writeVarint(len(s)); err != nil {
 				return err
 			}
-			if _, err := w.file.Write([]byte(s)); err != nil {
+			if _, err := w.writer().Write([]byte(s)); err != nil {
 				return err
 			}
 
@@ -157,7 +177,7 @@ func (w *Writer) writeRowValues(values []Value) error {
 			if err := w.writeVarint(len(b)); err != nil {
 				return err
 			}
-			if _, err := w.file.Write(b); err != nil {
+			if _, err := w.writer().Write(b); err != nil {
 				return err
 			}
 

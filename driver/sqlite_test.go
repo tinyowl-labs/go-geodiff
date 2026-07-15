@@ -46,9 +46,9 @@ func TestCreateChangesetRoundTrip(t *testing.T) {
 
 	// Test 1: Open with base and modified (identical files => empty changeset)
 	d := NewSqliteDriver()
-	err := d.Open(context.Background(), map[string]string{
-		"base":     tmpBase,
-		"modified": tmpModified,
+	err := d.Open(context.Background(), ConnInfo{
+		Base:     tmpBase,
+		Modified: tmpModified,
 	})
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
@@ -99,7 +99,7 @@ func TestListTables_GPKG(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	err := d.Open(context.Background(), map[string]string{"base": tmp})
+	err := d.Open(context.Background(), ConnInfo{Base: tmp})
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestTableSchema_GPKG(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	err := d.Open(context.Background(), map[string]string{"base": tmp})
+	err := d.Open(context.Background(), ConnInfo{Base: tmp})
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 
 	// 1. Open source and dump data
 	dSrc := NewSqliteDriver()
-	if err := dSrc.Open(context.Background(), map[string]string{"base": tmpSrc}); err != nil {
+	if err := dSrc.Open(context.Background(), ConnInfo{Base: tmpSrc}); err != nil {
 		t.Fatalf("Open source failed: %v", err)
 	}
 
@@ -216,7 +216,7 @@ func TestDumpDataAndApplyChangeset(t *testing.T) {
 	defer os.Remove(tmpDst)
 
 	dDst := NewSqliteDriver()
-	if err := dDst.Create(context.Background(), map[string]string{"base": tmpDst}, true); err != nil {
+	if err := dDst.Create(context.Background(), ConnInfo{Base: tmpDst}, true); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -268,7 +268,7 @@ func TestCreateChangeset_IdenticalFiles(t *testing.T) {
 	defer os.Remove(tmpModified)
 
 	d := NewSqliteDriver()
-	if err := d.Open(context.Background(), map[string]string{"base": tmpBase, "modified": tmpModified}); err != nil {
+	if err := d.Open(context.Background(), ConnInfo{Base: tmpBase, Modified: tmpModified}); err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 	defer d.Close()
@@ -324,7 +324,7 @@ func TestTableSchema_HasPrimaryKey(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	if err := d.Open(context.Background(), map[string]string{"base": tmp}); err != nil {
+	if err := d.Open(context.Background(), ConnInfo{Base: tmp}); err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 	defer d.Close()
@@ -361,7 +361,7 @@ func TestTableSchema_HasPrimaryKey(t *testing.T) {
 // TestOpen_NonexistentFile returns an error.
 func TestOpen_NonexistentFile(t *testing.T) {
 	d := NewSqliteDriver()
-	err := d.Open(context.Background(), map[string]string{"base": "/nonexistent/path/file.gpkg"})
+	err := d.Open(context.Background(), ConnInfo{Base: "/nonexistent/path/file.gpkg"})
 	if err == nil {
 		d.Close()
 		t.Error("Expected error opening nonexistent file, got nil")
@@ -371,7 +371,7 @@ func TestOpen_NonexistentFile(t *testing.T) {
 // TestOpen_MissingBaseKey returns an error.
 func TestOpen_MissingBaseKey(t *testing.T) {
 	d := NewSqliteDriver()
-	err := d.Open(context.Background(), map[string]string{})
+	err := d.Open(context.Background(), ConnInfo{})
 	if err == nil {
 		t.Error("Expected error for missing 'base' key, got nil")
 	}
@@ -383,7 +383,7 @@ func TestCreate_NewDatabase(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	if err := d.Create(context.Background(), map[string]string{"base": tmp}, true); err != nil {
+	if err := d.Create(context.Background(), ConnInfo{Base: tmp}, true); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 	if err := d.Close(); err != nil {
@@ -406,7 +406,7 @@ func TestCreate_AlreadyExists(t *testing.T) {
 	defer os.Remove(tmp)
 
 	d := NewSqliteDriver()
-	err := d.Create(context.Background(), map[string]string{"base": tmp}, false)
+	err := d.Create(context.Background(), ConnInfo{Base: tmp}, false)
 	if err == nil {
 		d.Close()
 		t.Error("Expected error creating database that already exists, got nil")

@@ -32,8 +32,6 @@ type Context struct {
 	filterMode      tablesFilterMode
 	tablesToSkip    map[string]bool
 	tablesToInclude map[string]bool
-
-	lastError string
 }
 
 // NewContext creates a Context with a default logger at LevelError.
@@ -127,31 +125,9 @@ func (c *Context) IsTableSkipped(tableName string) bool {
 	}
 }
 
-// setLastError records an error message.
-func (c *Context) setLastError(msg string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.lastError = msg
-}
-
-// LastError returns the last error message recorded on this context.
-func (c *Context) LastError() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.lastError
-}
-
 // Logger returns the current logger.
 func (c *Context) Logger() Logger {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.logger
-}
-
-// setAndLogError logs an error message and records it as the last error.
-func (c *Context) setAndLogError(msg string) {
-	c.mu.Lock()
-	c.lastError = msg
-	c.mu.Unlock()
-	c.logger.Error(msg)
 }
