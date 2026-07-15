@@ -9,6 +9,7 @@ package geodiff
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +26,7 @@ import (
 
 // Version returns the library version string.
 func Version() string {
-	return "2.3.0"
+	return "0.3.1"
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +272,7 @@ func valueToJSON(v changeset.Value) json.RawMessage {
 		return b
 	case changeset.TypeBlob:
 		blb, _ := v.AsBlob()
-		b, _ := json.Marshal(fmt.Sprintf("<blob %d bytes>", len(blb)))
+		b, _ := json.Marshal(base64.StdEncoding.EncodeToString(blb))
 		return b
 	default:
 		return json.RawMessage(`null`)
