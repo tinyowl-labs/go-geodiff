@@ -225,8 +225,7 @@ func listChangesJSON(changesetPath, jsonfile string, onlySummary bool) error {
 	}
 
 	if jsonfile == "" {
-		fmt.Println(string(res))
-		return nil
+		return NewGeoDiffError("output file is required for listChanges")
 	}
 	return FlushString(jsonfile, string(res))
 }
