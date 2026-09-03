@@ -1042,6 +1042,12 @@ func (d *SqliteDriver) initSpatialMetadata() error {
 			return fmt.Errorf("failure initializing spatial metadata: %w", err)
 		}
 	}
+	_ = addGpkgCrsDefinition(d.db, &schema.CrsDefinition{
+		SrsId:    4326,
+		AuthName: "EPSG",
+		AuthCode: 4326,
+		Wkt:      `GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]`,
+	})
 	return nil
 }
 
