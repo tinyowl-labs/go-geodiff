@@ -45,7 +45,7 @@ func TestConflictPostConflictDrop(t *testing.T) {
 	execSQL(t, ours, "UPDATE finds SET value = 88 WHERE fid = 4")          // D: clean (after conflict)
 
 	conflictFile := filepath.Join(tmpDir, "conflicts.json")
-	err = geodiff.Rebase(base, theirs, ours, conflictFile)
+	_, err = geodiff.Rebase(base, theirs, ours, conflictFile)
 	t.Logf("Rebase err: %v", err)
 
 	// Check all rows via a fresh connection (verifies durability).

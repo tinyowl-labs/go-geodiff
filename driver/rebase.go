@@ -17,27 +17,11 @@ import (
 	"github.com/tinyowl-labs/go-geodiff/changeset"
 )
 
-// ---------------------------------------------------------------------------
-// Conflict types
-// ---------------------------------------------------------------------------
-
-// ConflictItem represents a single column-level conflict detected during rebase.
-type ConflictItem struct {
-	Column int             `json:"column"`
-	Base   changeset.Value `json:"-"`
-	Theirs changeset.Value `json:"-"`
-	Ours   changeset.Value `json:"-"`
-}
-
-// ConflictFeature represents a row-level conflict detected during rebase.
-type ConflictFeature struct {
-	PK        int            `json:"-"`
-	TableName string         `json:"-"`
-	Items     []ConflictItem `json:"-"`
-}
-
-// IsValid returns true if this conflict feature contains at least one item.
-func (cf ConflictFeature) IsValid() bool { return len(cf.Items) > 0 }
+// ConflictItem / ConflictFeature are the typed rebase conflicts.
+// Canonical definition is changeset.ConflictFeature — the public geodiff
+// API re-exports the same type. Values are not written into the blob.
+type ConflictItem = changeset.ConflictItem
+type ConflictFeature = changeset.ConflictFeature
 
 // ---------------------------------------------------------------------------
 // Internal types for tracking rebase state
@@ -400,12 +384,12 @@ func handleDelete(
 	return true, nil
 }
 
-func addConflictItem(cf *ConflictFeature, col int, base, theirs, ours changeset.Value) {
+func addConflictItem(cf *changeset.ConflictFeature, col int, base, theirs, ours changeset.Value) {
 	// Column 4 of gpkg_contents is the last_change timestamp — not a conflict
 	if cf.TableName == "gpkg_contents" && col == 4 {
 		return
 	}
-	cf.Items = append(cf.Items, ConflictItem{
+	cf.Items = append(cf.Items, changeset.ConflictItem{
 		Column: col,
 		Base:   base,
 		Theirs: theirs,
@@ -697,23 +681,19 @@ func InvertChangeset(inputPath, outputPath string) error {
 //	base    — path to original BASE GPKG file
 //	theirs  — path to THEIRS GPKG file (remote version)
 //	ours    — path to OURS GPKG file (local copy, modified in place)
-//	conflictFile — path to write conflict JSON (only written if conflicts exist)
+//	conflictFile — optional C++-compat sidecar (written only if conflicts exist)
 //
-// Algorithm:
-//  1. Undo local changes: create BASE→OURS changeset, invert it, apply to OURS → OURS becomes BASE
-//  2. Create BASE→THEIRS changeset, apply to OURS → OURS becomes THEIRS
-//  3. Rebase local changes on top: create THEIRS→MERGED changeset, apply to OURS
-//  4. Write conflicts to conflictFile if any
+// Returns typed conflicts. The changeset blob is unchanged.
 func RebaseDirect(
 	base string,
 	theirs string,
 	ours string,
 	conflictFile string,
-) error {
+) ([]ConflictFeature, error) {
 	// --- Step 0: create temp directory for intermediate files ---
 	tmpDir, err := os.MkdirTemp("", "go-geodiff-rebase-")
 	if err != nil {
-		return fmt.Errorf("RebaseDirect: create temp dir: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
@@ -727,17 +707,17 @@ func RebaseDirect(
 	// 1a. Create BASE→OURS changeset
 	d1 := NewSqliteDriver()
 	if err := d1.Open(context.Background(), ConnInfo{Base: base, Modified: ours}); err != nil {
-		return fmt.Errorf("RebaseDirect: open base→ours: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: open base→ours: %w", err)
 	}
 	w1, err := changeset.NewWriter(baseOurs)
 	if err != nil {
 		d1.Close()
-		return fmt.Errorf("RebaseDirect: create base2ours writer: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: create base2ours writer: %w", err)
 	}
 	if err := d1.CreateChangeset(context.Background(), w1); err != nil {
 		w1.Close()
 		d1.Close()
-		return fmt.Errorf("RebaseDirect: createChangeset base→ours: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: createChangeset base→ours: %w", err)
 	}
 	w1.Close()
 	d1.Close()
@@ -748,23 +728,23 @@ func RebaseDirect(
 	if oursHasChanges {
 		// 1b. Invert BASE→OURS to OURS→BASE
 		if err := InvertChangeset(baseOurs, oursBase); err != nil {
-			return fmt.Errorf("RebaseDirect: invert base→ours: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: invert base→ours: %w", err)
 		}
 
 		// 1c. Apply OURS→BASE to OURS (undo local changes)
 		rInv, err := changeset.NewReader(oursBase)
 		if err != nil {
-			return fmt.Errorf("RebaseDirect: open inverted changeset: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: open inverted changeset: %w", err)
 		}
 		dApply := NewSqliteDriver()
 		if err := dApply.Open(context.Background(), ConnInfo{Base: ours}); err != nil {
 			rInv.Close()
-			return fmt.Errorf("RebaseDirect: open ours for undo: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: open ours for undo: %w", err)
 		}
 		if err := dApply.ApplyChangeset(context.Background(), rInv); err != nil {
 			rInv.Close()
 			dApply.Close()
-			return fmt.Errorf("RebaseDirect: apply undo changeset: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: apply undo changeset: %w", err)
 		}
 		rInv.Close()
 		dApply.Close()
@@ -775,17 +755,17 @@ func RebaseDirect(
 	// 2a. Create BASE→THEIRS changeset
 	d2 := NewSqliteDriver()
 	if err := d2.Open(context.Background(), ConnInfo{Base: base, Modified: theirs}); err != nil {
-		return fmt.Errorf("RebaseDirect: open base→theirs: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: open base→theirs: %w", err)
 	}
 	w2, err := changeset.NewWriter(baseTheirs)
 	if err != nil {
 		d2.Close()
-		return fmt.Errorf("RebaseDirect: create base2theirs writer: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: create base2theirs writer: %w", err)
 	}
 	if err := d2.CreateChangeset(context.Background(), w2); err != nil {
 		w2.Close()
 		d2.Close()
-		return fmt.Errorf("RebaseDirect: createChangeset base→theirs: %w", err)
+		return nil, fmt.Errorf("RebaseDirect: createChangeset base→theirs: %w", err)
 	}
 	w2.Close()
 	d2.Close()
@@ -796,17 +776,17 @@ func RebaseDirect(
 		// 2b. Apply BASE→THEIRS to OURS
 		rTheirs, err := changeset.NewReader(baseTheirs)
 		if err != nil {
-			return fmt.Errorf("RebaseDirect: open theirs changeset: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: open theirs changeset: %w", err)
 		}
 		dApply2 := NewSqliteDriver()
 		if err := dApply2.Open(context.Background(), ConnInfo{Base: ours}); err != nil {
 			rTheirs.Close()
-			return fmt.Errorf("RebaseDirect: open ours for theirs apply: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: open ours for theirs apply: %w", err)
 		}
 		if err := dApply2.ApplyChangeset(context.Background(), rTheirs); err != nil {
 			rTheirs.Close()
 			dApply2.Close()
-			return fmt.Errorf("RebaseDirect: apply theirs changeset: %w", err)
+			return nil, fmt.Errorf("RebaseDirect: apply theirs changeset: %w", err)
 		}
 		rTheirs.Close()
 		dApply2.Close()
@@ -814,42 +794,44 @@ func RebaseDirect(
 
 	// --- Step 3: Rebase local changes on top ---
 
+	var conflicts []ConflictFeature
 	if oursHasChanges {
 		// 3a. Create THEIRS→MERGED (rebased) changeset
-		conflicts, err := Rebase(baseTheirs, baseOurs, theirsMerged)
-		if err != nil {
-			return fmt.Errorf("RebaseDirect: rebase: %w", err)
+		var rebaseErr error
+		conflicts, rebaseErr = Rebase(baseTheirs, baseOurs, theirsMerged)
+		if rebaseErr != nil {
+			return nil, fmt.Errorf("RebaseDirect: rebase: %w", rebaseErr)
 		}
 
 		// 3b. Apply THEIRS→MERGED to OURS
 		if !fileBytesEmpty(theirsMerged) {
 			rMerged, err := changeset.NewReader(theirsMerged)
 			if err != nil {
-				return fmt.Errorf("RebaseDirect: open merged changeset: %w", err)
+				return nil, fmt.Errorf("RebaseDirect: open merged changeset: %w", err)
 			}
 			dApply3 := NewSqliteDriver()
 			if err := dApply3.Open(context.Background(), ConnInfo{Base: ours}); err != nil {
 				rMerged.Close()
-				return fmt.Errorf("RebaseDirect: open ours for merged apply: %w", err)
+				return nil, fmt.Errorf("RebaseDirect: open ours for merged apply: %w", err)
 			}
 			if err := dApply3.ApplyChangeset(context.Background(), rMerged); err != nil {
 				rMerged.Close()
 				dApply3.Close()
-				return fmt.Errorf("RebaseDirect: apply merged changeset: %w", err)
+				return nil, fmt.Errorf("RebaseDirect: apply merged changeset: %w", err)
 			}
 			rMerged.Close()
 			dApply3.Close()
 		}
 
-		// --- Step 4: Write conflicts ---
-		if len(conflicts) > 0 {
+		// Optional C++-compat sidecar — typed conflicts are the API.
+		if conflictFile != "" && len(conflicts) > 0 {
 			if err := writeConflictFile(conflictFile, conflicts); err != nil {
-				return fmt.Errorf("RebaseDirect: write conflicts: %w", err)
+				return nil, fmt.Errorf("RebaseDirect: write conflicts: %w", err)
 			}
 		}
 	}
 
-	return nil
+	return conflicts, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -902,25 +884,21 @@ func valueToJSON(v changeset.Value) any {
 	}
 }
 
-// writeConflictFile writes conflicts to a JSON file.
-func writeConflictFile(path string, conflicts []ConflictFeature) error {
+// MarshalConflicts serializes rebase conflicts to the geodiff JSON object
+// ({"geodiff":[...]}). Empty or invalid conflicts yield an empty object.
+func MarshalConflicts(conflicts []ConflictFeature) ([]byte, error) {
 	var entries []conflictFeatureJSON
-
 	for _, cf := range conflicts {
 		if !cf.IsValid() {
 			continue
 		}
-
 		fj := conflictFeatureJSON{
 			Table: cf.TableName,
 			Type:  "conflict",
 			FID:   fmt.Sprintf("%d", cf.PK),
 		}
-
 		for _, item := range cf.Items {
-			cij := conflictItemJSON{
-				Column: item.Column,
-			}
+			cij := conflictItemJSON{Column: item.Column}
 			if v := valueToJSON(item.Base); v != nil {
 				cij.Base = v
 			}
@@ -932,18 +910,26 @@ func writeConflictFile(path string, conflicts []ConflictFeature) error {
 			}
 			fj.Changes = append(fj.Changes, cij)
 		}
-
 		entries = append(entries, fj)
 	}
-
 	if len(entries) == 0 {
+		return []byte(`{"geodiff":[]}`), nil
+	}
+	return json.Marshal(conflictsJSON{Geodiff: entries})
+}
+
+// writeConflictFile writes C++-compat sidecar JSON. Empty path is a no-op —
+// typed []ConflictFeature is the API.
+func writeConflictFile(path string, conflicts []ConflictFeature) error {
+	if path == "" {
 		return nil
 	}
-
-	output := conflictsJSON{Geodiff: entries}
-	data, err := json.MarshalIndent(output, "", "  ")
+	data, err := MarshalConflicts(conflicts)
 	if err != nil {
 		return fmt.Errorf("writeConflictFile: marshal: %w", err)
+	}
+	if string(data) == `{"geodiff":[]}` {
+		return nil
 	}
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }

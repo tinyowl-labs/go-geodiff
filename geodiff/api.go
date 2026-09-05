@@ -802,26 +802,38 @@ func Schema(driverName, extraInfo, src, jsonfile string) error {
 	return FlushString(jsonfile, string(data))
 }
 
+// ConflictFeature is a row-level rebase conflict. The server stores these;
+// the review UI paints them. They are not written into the changeset blob.
+type ConflictFeature = changeset.ConflictFeature
+
+// ConflictItem is one column inside a ConflictFeature.
+type ConflictItem = changeset.ConflictItem
+
+// ConflictsToJSON encodes typed conflicts as {"geodiff":[...]} using
+// base / theirs / ours (product form, not the C++ old/new sidecar).
+func ConflictsToJSON(conflicts []ConflictFeature) ([]byte, error) {
+	return changeset.ConflictsToJSON(conflicts)
+}
+
 // ---------------------------------------------------------------------------
 // CreateRebasedChangeset
 // ---------------------------------------------------------------------------
 
-// CreateRebasedChangeset creates a rebased changeset.
-// BASE→MODIFIED is rebased on top of BASE→THEIRS, producing THEIRS→MERGED in 'rebased'.
-// Conflicts are written to conflictFile.
-func CreateRebasedChangeset(base, modified, base2their, rebased, conflictFile string) error {
+// CreateRebasedChangeset rebases BASE→MODIFIED onto BASE→THEIRS,
+// writing THEIRS→MERGED to rebased. Returns typed conflicts (empty if none).
+// conflictFile is an optional C++-compat sidecar; pass "" to skip.
+func CreateRebasedChangeset(base, modified, base2their, rebased, conflictFile string) ([]ConflictFeature, error) {
 	ctx := NewContext()
 
-	if conflictFile == "" {
-		return NewGeoDiffError("NULL arguments to createRebasedChangeset")
+	if conflictFile != "" {
+		_ = os.Remove(conflictFile)
 	}
-	_ = os.Remove(conflictFile)
 
 	// Verify we can open the database.
 	drv := driver.NewSqliteDriver()
 	if err := drv.Open(context.Background(), driver.ConnInfo{Base: modified}); err != nil {
 		drv.Close()
-		return wrapDriverError(ctx, "Unable to open database for rebase validation", err)
+		return nil, wrapDriverError(ctx, "Unable to open database for rebase validation", err)
 	}
 	drv.Close()
 
@@ -830,44 +842,52 @@ func CreateRebasedChangeset(base, modified, base2their, rebased, conflictFile st
 	defer os.Remove(base2modified)
 
 	if err := CreateChangeset(base, modified, base2modified); err != nil {
-		return err
+		return nil, err
 	}
 
 	return createRebasedChangesetEx(ctx, "sqlite", nil, base, base2modified, base2their, rebased, conflictFile)
 }
 
+// RebaseChangesets rebases BASE→OURS onto BASE→THEIRS, writing THEIRS→MERGED.
+// This is the only merge path when two changesets share a base but not a tip.
+// Envelope (base_commit + blob) is product metadata — not this function.
+func RebaseChangesets(baseTheirs, baseOurs, theirsMerged string) ([]ConflictFeature, error) {
+	if baseTheirs == "" || baseOurs == "" || theirsMerged == "" {
+		return nil, NewGeoDiffError("NULL arguments to rebaseChangesets")
+	}
+	return driver.Rebase(baseTheirs, baseOurs, theirsMerged)
+}
+
 // createRebasedChangesetEx performs the actual rebase of two changesets.
 func createRebasedChangesetEx(ctx *Context, driverName string, driverExtraInfo map[string]string,
-	base, base2modified, base2their, rebased, conflictFile string) error {
+	base, base2modified, base2their, rebased, conflictFile string) ([]ConflictFeature, error) {
 
-	if driverName == "" || base == "" || base2modified == "" || base2their == "" || rebased == "" || conflictFile == "" {
-		return NewGeoDiffError("NULL arguments to createRebasedChangesetEx")
+	if driverName == "" || base == "" || base2modified == "" || base2their == "" || rebased == "" {
+		return nil, NewGeoDiffError("NULL arguments to createRebasedChangesetEx")
 	}
 
 	// Delegate to driver.Rebase which has proper value-level rebasing.
 	// base2their = base→theirs (their changes)
 	// base2modified = base→ours (our changes)
 	// rebased = output (theirs→merged, our changes rebased on theirs)
-	driverConflicts, err := driver.Rebase(base2their, base2modified, rebased)
+	conflicts, err := driver.Rebase(base2their, base2modified, rebased)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if len(driverConflicts) == 0 {
+	if len(conflicts) == 0 {
 		ctx.Logger().Debug("No conflicts present")
-	} else {
-		// Convert driver conflict format to geodiff conflict format.
-		conflicts := convertConflicts(driverConflicts)
-		data, _ := json.MarshalIndent(conflictsJSON{Geodiff: conflicts}, "", "  ")
+	} else if conflictFile != "" {
+		data, _ := json.MarshalIndent(conflictsJSON{Geodiff: convertConflicts(conflicts)}, "", "  ")
 		_ = FlushString(conflictFile, string(data))
 	}
-	return nil
+	return conflicts, nil
 }
 
-// convertConflicts converts driver.ConflictFeature to the geodiff conflictFeature format.
-func convertConflicts(driverConflicts []driver.ConflictFeature) []conflictFeature {
-	result := make([]conflictFeature, 0, len(driverConflicts))
-	for _, dcf := range driverConflicts {
+// convertConflicts converts ConflictFeature to the C++ sidecar shape (old/new).
+func convertConflicts(src []ConflictFeature) []conflictFeature {
+	result := make([]conflictFeature, 0, len(src))
+	for _, dcf := range src {
 		if !dcf.IsValid() {
 			continue
 		}
@@ -893,29 +913,35 @@ func convertConflicts(driverConflicts []driver.ConflictFeature) []conflictFeatur
 // Rebase
 // ---------------------------------------------------------------------------
 
+// MarshalConflicts is the C++ sidecar JSON form (old=theirs, new=ours).
+func MarshalConflicts(conflicts []ConflictFeature) ([]byte, error) {
+	return driver.MarshalConflicts(conflicts)
+}
+
 // Rebase rebases local modifications on top of remote changes.
 // base: original, modifiedTheir: remote version, modified: local copy (modified in place).
-func Rebase(base, modifiedTheir, modified, conflictFile string) error {
+// Returns typed conflicts. conflictFile is an optional C++-compat sidecar; pass "" to skip.
+func Rebase(base, modifiedTheir, modified, conflictFile string) ([]ConflictFeature, error) {
 	ctx := NewContext()
 
-	if base == "" || modifiedTheir == "" || modified == "" || conflictFile == "" {
-		return NewGeoDiffError("NULL arguments to rebase")
+	if base == "" || modifiedTheir == "" || modified == "" {
+		return nil, NewGeoDiffError("NULL arguments to rebase")
 	}
 	if !FileExists(base) {
-		return NewGeoDiffError("Missing 'base' file in rebase: " + base)
+		return nil, NewGeoDiffError("Missing 'base' file in rebase: " + base)
 	}
 	if !FileExists(modifiedTheir) {
-		return NewGeoDiffError("Missing 'modified_their' file in rebase: " + modifiedTheir)
+		return nil, NewGeoDiffError("Missing 'modified_their' file in rebase: " + modifiedTheir)
 	}
 	if !FileExists(modified) {
-		return NewGeoDiffError("Missing 'modified' file in rebase: " + modified)
+		return nil, NewGeoDiffError("Missing 'modified' file in rebase: " + modified)
 	}
 
 	base2theirs := modified + "_base2theirs.bin"
 	defer os.Remove(base2theirs)
 
 	if err := createChangesetEx(ctx, "sqlite", nil, base, modifiedTheir, base2theirs); err != nil {
-		return NewGeoDiffError("Unable to perform createChangeset base2theirs: " + err.Error())
+		return nil, NewGeoDiffError("Unable to perform createChangeset base2theirs: " + err.Error())
 	}
 
 	return rebaseEx(ctx, "sqlite", nil, base, modified, base2theirs, conflictFile)
@@ -923,10 +949,10 @@ func Rebase(base, modifiedTheir, modified, conflictFile string) error {
 
 // rebaseEx performs the full rebase operation.
 func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string,
-	base, modified, base2their, conflictFile string) error {
+	base, modified, base2their, conflictFile string) ([]ConflictFeature, error) {
 
-	if base == "" || modified == "" || base2their == "" || conflictFile == "" {
-		return NewGeoDiffError("NULL arguments to rebaseEx")
+	if base == "" || modified == "" || base2their == "" {
+		return nil, NewGeoDiffError("NULL arguments to rebaseEx")
 	}
 
 	root := filepath.Join(TmpDir(), "geodiff_"+RandomString(6))
@@ -934,10 +960,10 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 	// Situation 1: base2theirs has no changes, nothing to do.
 	hasTheir, err := HasChanges(base2their)
 	if err != nil {
-		return NewGeoDiffError("Failed to check base2their changes: " + err.Error())
+		return nil, NewGeoDiffError("Failed to check base2their changes: " + err.Error())
 	}
 	if !hasTheir {
-		return nil
+		return nil, nil
 	}
 
 	// Situation 2: base2modified has no changes → just apply base2theirs.
@@ -945,19 +971,19 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 	defer os.Remove(base2modified)
 
 	if err := createChangesetEx(ctx, driverName, driverExtraInfo, base, modified, base2modified); err != nil {
-		return NewGeoDiffError("Unable to perform createChangeset base2modified: " + err.Error())
+		return nil, NewGeoDiffError("Unable to perform createChangeset base2modified: " + err.Error())
 	}
 
 	hasOurs, err := HasChanges(base2modified)
 	if err != nil {
-		return NewGeoDiffError("Failed to check base2modified changes: " + err.Error())
+		return nil, NewGeoDiffError("Failed to check base2modified changes: " + err.Error())
 	}
 	if !hasOurs {
 		// modified == base, so just apply their changes.
 		if err := applyChangesetEx(ctx, driverName, driverExtraInfo, modified, base2their); err != nil {
-			return NewGeoDiffError("Unable to perform applyChangeset base2theirs: " + err.Error())
+			return nil, NewGeoDiffError("Unable to perform applyChangeset base2theirs: " + err.Error())
 		}
-		return nil
+		return nil, nil
 	}
 
 	// Situation 3: both sides have changes.
@@ -965,9 +991,10 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 	theirs2final := root + "_theirs2final.bin"
 	defer os.Remove(theirs2final)
 
-	if err := createRebasedChangesetEx(ctx, driverName, driverExtraInfo, base,
-		base2modified, base2their, theirs2final, conflictFile); err != nil {
-		return NewGeoDiffError("Unable to perform createRebasedChangeset theirs2final: " + err.Error())
+	conflicts, err := createRebasedChangesetEx(ctx, driverName, driverExtraInfo, base,
+		base2modified, base2their, theirs2final, conflictFile)
+	if err != nil {
+		return nil, NewGeoDiffError("Unable to perform createRebasedChangeset theirs2final: " + err.Error())
 	}
 
 	// Undo our local changes: invert base→modified → modified→base.
@@ -975,7 +1002,7 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 	defer os.Remove(modified2base)
 
 	if err := invertChangesetByPath(ctx, base2modified, modified2base); err != nil {
-		return NewGeoDiffError("Unable to perform invertChangeset modified2base: " + err.Error())
+		return nil, NewGeoDiffError("Unable to perform invertChangeset modified2base: " + err.Error())
 	}
 
 	// Concat: modified→base + base→their + their→final → modified→final.
@@ -983,15 +1010,15 @@ func rebaseEx(ctx *Context, driverName string, driverExtraInfo map[string]string
 	defer os.Remove(modified2final)
 
 	if err := ConcatChanges([]string{modified2base, base2their, theirs2final}, modified2final); err != nil {
-		return NewGeoDiffError("Unable to concat changesets: " + err.Error())
+		return nil, NewGeoDiffError("Unable to concat changesets: " + err.Error())
 	}
 
 	// Apply.
 	if err := applyChangesetEx(ctx, driverName, driverExtraInfo, modified, modified2final); err != nil {
-		return NewGeoDiffError("Unable to perform applyChangeset modified2final: " + err.Error())
+		return nil, NewGeoDiffError("Unable to perform applyChangeset modified2final: " + err.Error())
 	}
 
-	return nil
+	return conflicts, nil
 }
 
 // ---------------------------------------------------------------------------

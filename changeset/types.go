@@ -5,6 +5,8 @@
 package changeset
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 )
 
@@ -132,6 +134,92 @@ func (v Value) String() string {
 		return "null"
 	default:
 		return "unknown"
+	}
+}
+
+// MarshalJSON encodes a Value as a typed object the product can store
+// ({"type":"int","value":1}, {"type":"undefined"}, …). Blobs are base64.
+func (v Value) MarshalJSON() ([]byte, error) {
+	switch v.typ {
+	case TypeUndefined:
+		return []byte(`{"type":"undefined"}`), nil
+	case TypeNull:
+		return []byte(`{"type":"null"}`), nil
+	case TypeInt:
+		return json.Marshal(struct {
+			Type  string `json:"type"`
+			Value int64  `json:"value"`
+		}{Type: "int", Value: v.intVal})
+	case TypeDouble:
+		return json.Marshal(struct {
+			Type  string  `json:"type"`
+			Value float64 `json:"value"`
+		}{Type: "double", Value: v.floatVal})
+	case TypeText:
+		return json.Marshal(struct {
+			Type  string `json:"type"`
+			Value string `json:"value"`
+		}{Type: "text", Value: v.strVal})
+	case TypeBlob:
+		return json.Marshal(struct {
+			Type  string `json:"type"`
+			Value string `json:"value"`
+		}{Type: "blob", Value: base64.StdEncoding.EncodeToString(v.blobVal)})
+	default:
+		return nil, fmt.Errorf("Value.MarshalJSON: unknown type %s", v.typ)
+	}
+}
+
+// UnmarshalJSON decodes the typed object produced by MarshalJSON.
+func (v *Value) UnmarshalJSON(data []byte) error {
+	var head struct {
+		Type  string          `json:"type"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return fmt.Errorf("Value.UnmarshalJSON: %w", err)
+	}
+	switch head.Type {
+	case "undefined":
+		*v = NewValueUndefined()
+		return nil
+	case "null":
+		*v = NewValueNull()
+		return nil
+	case "int":
+		var n int64
+		if err := json.Unmarshal(head.Value, &n); err != nil {
+			return fmt.Errorf("Value.UnmarshalJSON int: %w", err)
+		}
+		*v = NewValueInt(n)
+		return nil
+	case "double":
+		var f float64
+		if err := json.Unmarshal(head.Value, &f); err != nil {
+			return fmt.Errorf("Value.UnmarshalJSON double: %w", err)
+		}
+		*v = NewValueDouble(f)
+		return nil
+	case "text":
+		var s string
+		if err := json.Unmarshal(head.Value, &s); err != nil {
+			return fmt.Errorf("Value.UnmarshalJSON text: %w", err)
+		}
+		*v = NewValueText(s)
+		return nil
+	case "blob":
+		var s string
+		if err := json.Unmarshal(head.Value, &s); err != nil {
+			return fmt.Errorf("Value.UnmarshalJSON blob: %w", err)
+		}
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return fmt.Errorf("Value.UnmarshalJSON blob: %w", err)
+		}
+		*v = NewValueBlob(b)
+		return nil
+	default:
+		return fmt.Errorf("Value.UnmarshalJSON: unknown type %q", head.Type)
 	}
 }
 

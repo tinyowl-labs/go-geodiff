@@ -850,7 +850,7 @@ func TestRebaseDirect_GpkgNoConflict(t *testing.T) {
 	defer os.Remove(theirsFile)
 
 	// Rebase identical files — should be no-op
-	if err := RebaseDirect(baseFile, theirsFile, oursFile, conflictFile); err != nil {
+	if _, err := RebaseDirect(baseFile, theirsFile, oursFile, conflictFile); err != nil {
 		t.Fatalf("RebaseDirect failed: %v", err)
 	}
 

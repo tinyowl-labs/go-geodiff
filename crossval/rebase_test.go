@@ -74,7 +74,7 @@ func BenchmarkRebase_NoConflict(b *testing.B) {
 		if err := os.WriteFile(oursCopy, srcData, 0644); err != nil {
 			b.Fatal(err)
 		}
-		if err := geodiff.Rebase(base, theirs, oursCopy, filepath.Join(tmpDir, "conflicts.json")); err != nil {
+		if _, err := geodiff.Rebase(base, theirs, oursCopy, filepath.Join(tmpDir, "conflicts.json")); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -123,7 +123,7 @@ func TestRebaseCrossVal_NoConflict(t *testing.T) {
 	// Go CreateRebasedChangeset: modified (ours) has no changes relative to base.
 	goRebased := filepath.Join(tmpDir, "go_rebased.bin")
 	goConflicts := filepath.Join(tmpDir, "go_conflicts.json")
-	err = geodiff.CreateRebasedChangeset(base, oursCopy, baseTheirsDiff, goRebased, goConflicts)
+	_, err = geodiff.CreateRebasedChangeset(base, oursCopy, baseTheirsDiff, goRebased, goConflicts)
 	if err != nil {
 		t.Fatalf("Go CreateRebasedChangeset: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestRebaseCrossVal_ExistingFixtures(t *testing.T) {
 
 			goRebased := filepath.Join(tmpDir, "go_rebased.bin")
 			goConflicts := filepath.Join(tmpDir, "go_conflicts.json")
-			if err := geodiff.CreateRebasedChangeset(base, modified, tc.theirs, goRebased, goConflicts); err != nil {
+			if _, err := geodiff.CreateRebasedChangeset(base, modified, tc.theirs, goRebased, goConflicts); err != nil {
 				t.Fatalf("Go CreateRebasedChangeset: %v", err)
 			}
 

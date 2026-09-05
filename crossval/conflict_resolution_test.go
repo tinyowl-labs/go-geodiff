@@ -40,7 +40,7 @@ func TestConflictDefaultResolution(t *testing.T) {
 	oursForRebase := filepath.Join(tmpDir, "ours_rebase.gpkg")
 	copyFileData(readFile(t, ours), oursForRebase)
 	conflictFile1 := filepath.Join(tmpDir, "conflicts1.json")
-	err1 := geodiff.Rebase(base, theirs, oursForRebase, conflictFile1)
+	_, err1 := geodiff.Rebase(base, theirs, oursForRebase, conflictFile1)
 
 	t.Logf("Path 1 (Rebase in-place): err=%v", err1)
 
@@ -60,7 +60,7 @@ func TestConflictDefaultResolution(t *testing.T) {
 	}
 	rebased := filepath.Join(tmpDir, "theirs2merged.bin")
 	conflictFile2 := filepath.Join(tmpDir, "conflicts2.json")
-	err2 := geodiff.CreateRebasedChangeset(base, ours, base2theirs, rebased, conflictFile2)
+	_, err2 := geodiff.CreateRebasedChangeset(base, ours, base2theirs, rebased, conflictFile2)
 
 	t.Logf("Path 2 (CreateRebasedChangeset): err=%v", err2)
 

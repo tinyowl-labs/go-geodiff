@@ -606,7 +606,7 @@ func TestRebaseRoundTrip(t *testing.T) {
 
 	// Rebase ours on top of theirs.
 	// Since ours == base, the rebase simply applies theirs to ours.
-	if err := Rebase(base, theirs, ours, conflict); err != nil {
+	if _, err := Rebase(base, theirs, ours, conflict); err != nil {
 		t.Fatalf("Rebase failed: %v", err)
 	}
 
@@ -665,7 +665,7 @@ func TestRebaseWithChanges(t *testing.T) {
 	// Run rebase — verifies the pipeline doesn't crash.
 	// The full rebase involves creating changesets, inverting, concatenating,
 	// and applying, which exercises the entire API surface.
-	err := Rebase(base, theirs, ours, conflict)
+	_, err := Rebase(base, theirs, ours, conflict)
 	if err != nil {
 		t.Logf("Rebase (situation 3) returned: %v (this is expected for non-trivial merges)", err)
 	}
@@ -731,7 +731,7 @@ func TestCreateRebasedChangeset(t *testing.T) {
 	}
 
 	// Create rebased changeset.
-	if err := CreateRebasedChangeset(base, modified, diffBaseTheir, rebased, conflict); err != nil {
+	if _, err := CreateRebasedChangeset(base, modified, diffBaseTheir, rebased, conflict); err != nil {
 		t.Fatalf("CreateRebasedChangeset failed: %v", err)
 	}
 

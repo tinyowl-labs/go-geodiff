@@ -15,8 +15,12 @@ err := geodiff.CreateChangeset("base.gpkg", "modified.gpkg", "changes.diff")
 // Apply a diff to a GPKG (in-place)
 err = geodiff.ApplyChangeset("target.gpkg", "changes.diff")
 
-// Rebase local changes on top of remote
-err = geodiff.Rebase("base.gpkg", "remote.gpkg", "local.gpkg", "conflicts.json")
+// Rebase local changes on top of remote. Conflicts are typed values
+// (sidecar path is optional C++ compat).
+conflicts, err := geodiff.Rebase("base.gpkg", "remote.gpkg", "local.gpkg", "")
+
+// Two changesets that share a base: the only diverge path. No Branch type.
+conflicts, err = geodiff.RebaseChangesets("base2theirs.diff", "base2ours.diff", "theirs2merged.diff")
 
 // Export changeset as JSON
 err = geodiff.ListChanges("changes.diff", "changes.json")
@@ -41,7 +45,7 @@ Binary changeset files produced by go-geodiff are **byte-identical** to those pr
 
 | Package | Purpose |
 |---------|---------|
-| `geodiff` | Public API — `CreateChangeset`, `ApplyChangeset`, `Rebase`, `CreateInitialDiff`, `InvertChangeset`, `ListChanges`, `MakeCopy`, `Schema`, `DumpData`, WKB header stripping |
+| `geodiff` | Public API — `CreateChangeset`, `ApplyChangeset`, `Rebase` / `RebaseChangesets` (typed `ConflictFeature`), `CreateInitialDiff`, `InvertChangeset`, `ListChanges`, `MakeCopy`, `Schema`, `DumpData`, WKB header stripping |
 | `driver` | `SqliteDriver` — ATTACH-based SQL diffing. `Rebase` — 3-way merge engine |
 | `changeset` | Binary changeset format — reader, writer, types, invert, concat, JSON export |
 | `schema` | `TableSchema`, `TableColumnInfo`, `CrsDefinition` — database introspection |

@@ -47,7 +47,7 @@ func TestRebaseNonConflictDifferentValues(t *testing.T) {
 	// CreateRebasedChangeset: rebase ours on top of theirs.
 	rebased := filepath.Join(tmpDir, "theirs2merged.bin")
 	conflictFile := filepath.Join(tmpDir, "conflicts.json")
-	if err := geodiff.CreateRebasedChangeset(base, ours, diffBaseTheirs, rebased, conflictFile); err != nil {
+	if _, err := geodiff.CreateRebasedChangeset(base, ours, diffBaseTheirs, rebased, conflictFile); err != nil {
 		t.Fatalf("CreateRebasedChangeset: %v", err)
 	}
 

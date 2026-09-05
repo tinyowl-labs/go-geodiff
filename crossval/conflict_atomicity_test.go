@@ -39,7 +39,7 @@ func TestConflictAtomicity(t *testing.T) {
 	execSQL(t, ours, "UPDATE finds SET value = 99 WHERE fid = 2")
 
 	conflictFile := filepath.Join(tmpDir, "conflicts.json")
-	err = geodiff.Rebase(base, theirs, ours, conflictFile)
+	_, err = geodiff.Rebase(base, theirs, ours, conflictFile)
 
 	t.Logf("Rebase err: %v", err)
 

@@ -61,7 +61,7 @@ func TestRebaseCrossVal_SameCellConflict(t *testing.T) {
 	// Go rebase
 	goRebased := filepath.Join(tmpDir, "go_rebased.bin")
 	goConflicts := filepath.Join(tmpDir, "go_conflicts.json")
-	if err := geodiff.CreateRebasedChangeset(base, ours, baseTheirsGo, goRebased, goConflicts); err != nil {
+	if _, err := geodiff.CreateRebasedChangeset(base, ours, baseTheirsGo, goRebased, goConflicts); err != nil {
 		t.Fatalf("Go CreateRebasedChangeset: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestRebaseCrossVal_InsertCollision(t *testing.T) {
 
 	goRebased := filepath.Join(tmpDir, "go_rebased.bin")
 	goConflicts := filepath.Join(tmpDir, "go_conflicts.json")
-	if err := geodiff.CreateRebasedChangeset(base, ours, baseTheirsGo, goRebased, goConflicts); err != nil {
+	if _, err := geodiff.CreateRebasedChangeset(base, ours, baseTheirsGo, goRebased, goConflicts); err != nil {
 		t.Fatalf("Go CreateRebasedChangeset: %v", err)
 	}
 

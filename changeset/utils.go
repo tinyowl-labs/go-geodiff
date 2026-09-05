@@ -17,19 +17,25 @@ import (
 // ----- Conflict types -----
 
 // ConflictItem describes a single column conflict during merge.
+// Column is a 0-based index into the table schema (names are not in the blob).
 type ConflictItem struct {
-	Column int
-	Base   Value
-	Theirs Value
-	Ours   Value
+	Column int   `json:"column"`
+	Base   Value `json:"base"`
+	Theirs Value `json:"theirs"`
+	Ours   Value `json:"ours"`
 }
 
 // ConflictFeature describes all conflicts for a single feature (row).
+// This is the typed value the product stores and the review UI paints.
+// It is not written into the changeset blob.
 type ConflictFeature struct {
-	PK        int
-	TableName string
-	Items     []ConflictItem
+	PK        int            `json:"pk"`
+	TableName string         `json:"table"`
+	Items     []ConflictItem `json:"items"`
 }
+
+// IsValid reports whether this feature has at least one conflict item.
+func (cf ConflictFeature) IsValid() bool { return len(cf.Items) > 0 }
 
 // ----- Hex / Bin helpers -----
 
