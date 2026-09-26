@@ -31,6 +31,14 @@ func quoteIdent(s string) string {
 	return q + strings.ReplaceAll(s, q, q+q) + q
 }
 
+// Column descriptions are user-authored schema data with a stable composite
+// primary key. Track them alongside features. Other gpkg_* catalog tables keep
+// their existing exclusion: in particular constraints/metadata_reference have
+// no suitable primary key and cannot safely be opted in as a group.
+func skipGpkgTable(name string) bool {
+	return strings.HasPrefix(name, "gpkg_") && name != "gpkg_data_columns"
+}
+
 // ChangeApplyResult mirrors the C++ ChangeApplyResult enum.
 type ChangeApplyResult int
 
@@ -232,7 +240,7 @@ func (d *SqliteDriver) ListTables(ctx context.Context, side Side) ([]string, err
 		if name == "" {
 			continue
 		}
-		if strings.HasPrefix(name, "gpkg_") {
+		if skipGpkgTable(name) {
 			continue
 		}
 		if strings.HasPrefix(name, "rtree_") {
@@ -347,7 +355,8 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, side S
 		}
 
 		if srsId != -1 {
-			crsQuery := fmt.Sprintf("SELECT * FROM %s.gpkg_spatial_ref_sys WHERE srs_id = %d", dbName, srsId)
+			// CRS WKT extensions add columns; read the core fields explicitly.
+			crsQuery := fmt.Sprintf("SELECT srs_name,srs_id,organization,organization_coordsys_id,definition,description FROM %s.gpkg_spatial_ref_sys WHERE srs_id = %d", dbName, srsId)
 			crsRows, cErr := d.db.QueryContext(ctx, crsQuery)
 			if cErr != nil {
 				return nil, fmt.Errorf("failed to query gpkg_spatial_ref_sys: %w", cErr)
@@ -356,13 +365,15 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, side S
 				crsRows.Close()
 				return nil, fmt.Errorf("unable to find entry in gpkg_spatial_ref_sys for srs_id = %d", srsId)
 			}
-			var srsName, orgName, definition, description string
+			// srs_name, organization, definition and description may be NULL in the wild.
+			var srsNameN, orgNameN, definitionN, descriptionN sql.NullString
 			var srsID2, orgCoordsysID int
-			if err := crsRows.Scan(&srsName, &srsID2, &orgName, &orgCoordsysID, &definition, &description); err != nil {
+			if err := crsRows.Scan(&srsNameN, &srsID2, &orgNameN, &orgCoordsysID, &definitionN, &descriptionN); err != nil {
 				crsRows.Close()
 				return nil, fmt.Errorf("failed to scan CRS: %w", err)
 			}
 			crsRows.Close()
+			orgName, definition := orgNameN.String, definitionN.String
 			if orgName == "" {
 				return nil, fmt.Errorf("NULL auth name in gpkg_spatial_ref_sys: %s", tableName)
 			}
@@ -393,6 +404,21 @@ func (d *SqliteDriver) TableSchema(ctx context.Context, tableName string, side S
 
 // --- Changeset creation ---
 
+// Read SQL storage values without modernc's declared-type decoding to
+// time.Time/bool. Unary + is a value-preserving SQLite expression; unlike CAST
+// it does not coerce malformed legacy values or change NULL/storage classes.
+func sqlValueProjection(dbName, tableName string, tbl *schema.TableSchema) string {
+	cols := make([]string, len(tbl.Columns))
+	for i, c := range tbl.Columns {
+		cols[i] = quoteIdent(dbName) + "." + quoteIdent(tableName) + "." + quoteIdent(c.Name)
+		switch strings.ToUpper(c.Type.DBType) {
+		case "DATE", "DATETIME", "TIMESTAMP", "BOOLEAN", "BOOL":
+			cols[i] = "+" + cols[i]
+		}
+	}
+	return strings.Join(cols, ", ")
+}
+
 func sqlFindInserted(tableName string, tbl *schema.TableSchema, reverse bool) string {
 	qTable := quoteIdent(tableName)
 	var exprPk strings.Builder
@@ -410,8 +436,8 @@ func sqlFindInserted(tableName string, tbl *schema.TableSchema, reverse bool) st
 	if reverse {
 		fromDB, otherDB = otherDB, fromDB
 	}
-	return fmt.Sprintf("SELECT * FROM \"%s\".%s WHERE NOT EXISTS (SELECT 1 FROM \"%s\".%s WHERE %s)",
-		fromDB, qTable, otherDB, qTable, exprPk.String())
+	return fmt.Sprintf("SELECT %s FROM \"%s\".%s WHERE NOT EXISTS (SELECT 1 FROM \"%s\".%s WHERE %s)",
+		sqlValueProjection(fromDB, tableName, tbl), fromDB, qTable, otherDB, qTable, exprPk.String())
 }
 
 func sqlFindModified(tableName string, tbl *schema.TableSchema) string {
@@ -434,11 +460,11 @@ func sqlFindModified(tableName string, tbl *schema.TableSchema) string {
 		}
 	}
 	if exprOther.Len() == 0 {
-		return fmt.Sprintf("SELECT * FROM \"main\".%s, \"aux\".%s WHERE %s",
-			qTable, qTable, exprPk.String())
+		return fmt.Sprintf("SELECT %s, %s FROM \"main\".%s, \"aux\".%s WHERE %s",
+			sqlValueProjection("main", tableName, tbl), sqlValueProjection("aux", tableName, tbl), qTable, qTable, exprPk.String())
 	}
-	return fmt.Sprintf("SELECT * FROM \"main\".%s, \"aux\".%s WHERE %s AND (%s)",
-		qTable, qTable, exprPk.String(), exprOther.String())
+	return fmt.Sprintf("SELECT %s, %s FROM \"main\".%s, \"aux\".%s WHERE %s AND (%s)",
+		sqlValueProjection("main", tableName, tbl), sqlValueProjection("aux", tableName, tbl), qTable, qTable, exprPk.String(), exprOther.String())
 }
 
 func changesetValue(val any) changeset.Value {
@@ -797,7 +823,7 @@ func (d *SqliteDriver) applyDelete(tableName string, tbl *schema.TableSchema, en
 func (d *SqliteDriver) applyChange(ctx context.Context, state map[string]*schema.TableSchema, entry *changeset.ChangesetEntry) (ChangeApplyResult, error) {
 	tableName := entry.Table.Name
 
-	if strings.HasPrefix(tableName, "gpkg_") {
+	if skipGpkgTable(tableName) {
 		return ApplySkipped, nil
 	}
 
@@ -1059,7 +1085,7 @@ func (d *SqliteDriver) CreateTables(ctx context.Context, tables []*schema.TableS
 	}
 
 	for _, tbl := range tables {
-		if strings.HasPrefix(tbl.Name, "gpkg_") {
+		if skipGpkgTable(tbl.Name) {
 			continue
 		}
 		if tbl.GeometryColumn() >= 0 {
@@ -1169,7 +1195,7 @@ func (d *SqliteDriver) DumpData(ctx context.Context, writer *changeset.Writer, s
 			continue
 		}
 		tw := &tableWriter{w: writer, first: true}
-		query := fmt.Sprintf("SELECT * FROM \"%s\".%s", dbName, quoteIdent(tableName))
+		query := fmt.Sprintf("SELECT %s FROM \"%s\".%s", sqlValueProjection(dbName, tableName, tbl), dbName, quoteIdent(tableName))
 		rows, err := d.db.QueryContext(ctx, query)
 		if err != nil {
 			return fmt.Errorf("failure dumping changeset: %w", err)
