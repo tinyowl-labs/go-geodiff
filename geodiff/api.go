@@ -319,15 +319,18 @@ func changesetToJSON(reader *changeset.Reader) ([]byte, error) {
 				})
 			}
 		case changeset.OpUpdate:
+			// Like C++ geodiff, list every column with an old or new value:
+			// primary keys carry only an old value, and without them an
+			// update does not say which row it changed.
 			for i := range entry.NewValues {
 				oldV := entry.OldValues[i]
 				newV := entry.NewValues[i]
-				if newV.Type() == changeset.TypeUndefined {
+				if newV.Type() == changeset.TypeUndefined && oldV.Type() == changeset.TypeUndefined {
 					continue
 				}
-				ch := jsonChange{
-					Column: i,
-					New:    valueToJSON(newV),
+				ch := jsonChange{Column: i}
+				if newV.Type() != changeset.TypeUndefined {
+					ch.New = valueToJSON(newV)
 				}
 				if oldV.Type() != changeset.TypeUndefined {
 					ch.Old = valueToJSON(oldV)

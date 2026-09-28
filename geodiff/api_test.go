@@ -2,6 +2,7 @@ package geodiff
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1072,4 +1073,70 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestListChangesUpdateNamesRow checks that an update lists its primary key
+// (old value only), as C++ geodiff does, so the changed row is identifiable.
+func TestListChangesUpdateNamesRow(t *testing.T) {
+	base := tmpPath(t, "test_list_update_base.sqlite")
+	modified := tmpPath(t, "test_list_update_modified.sqlite")
+	diff := tmpPath(t, "test_list_update.diff")
+	jsonFile := tmpPath(t, "test_list_update.json")
+	for _, p := range []string{base, modified, diff, jsonFile} {
+		defer os.Remove(p)
+	}
+	createTestDB(t, base, []struct {
+		Name  string
+		Value int
+	}{{"hello", 42}, {"world", 7}})
+	if err := FileCopy(modified, base); err != nil {
+		t.Fatalf("copy failed: %v", err)
+	}
+	db, err := sql.Open("sqlite", modified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE simple SET value = 43 WHERE name = 'hello'"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+	if err := CreateChangeset(base, modified, diff); err != nil {
+		t.Fatalf("CreateChangeset failed: %v", err)
+	}
+	if err := ListChanges(diff, jsonFile); err != nil {
+		t.Fatalf("ListChanges failed: %v", err)
+	}
+	raw, err := os.ReadFile(jsonFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Geodiff []struct {
+			Type    string `json:"type"`
+			Changes []struct {
+				Column int              `json:"column"`
+				Old    *json.RawMessage `json:"old"`
+				New    *json.RawMessage `json:"new"`
+			} `json:"changes"`
+		} `json:"geodiff"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Geodiff) != 1 || out.Geodiff[0].Type != "update" {
+		t.Fatalf("want one update, got %s", raw)
+	}
+	var pk, changed bool
+	for _, c := range out.Geodiff[0].Changes {
+		if c.Column == 0 && c.Old != nil && c.New == nil && string(*c.Old) == "1" {
+			pk = true
+		}
+		if c.Old != nil && c.New != nil && string(*c.Old) == "42" && string(*c.New) == "43" {
+			changed = true
+		}
+	}
+	if !pk || !changed {
+		t.Fatalf("update must list its primary key (old only) and the changed value: %s", raw)
+	}
 }
