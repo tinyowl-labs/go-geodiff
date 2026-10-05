@@ -363,9 +363,10 @@ func handleDelete(
 		}
 	}
 
-	// Find previously new values (from theirs update) to use as base
+	// Find previously new values (from theirs update) to use as base.
+	// A renumbered key is our own inserted row, not theirs' row of that number.
 	patchedVals, wasUpdated := tableInfo.updated[pk]
-	if !wasUpdated {
+	if !wasUpdated || newPK != pk {
 		patchedVals = make([]changeset.Value, numColumns)
 	}
 
@@ -415,8 +416,10 @@ func handleUpdate(
 	}
 
 	// Check if this update conflicts with a theirs delete
+	newPK := pk
 	if mapping.hasOldPkey(entry.Table.Name, pk) {
-		newPK, mapErr := mapping.getNewPkey(entry.Table.Name, pk)
+		var mapErr error
+		newPK, mapErr = mapping.getNewPkey(entry.Table.Name, pk)
 		if mapErr != nil {
 			return false, mapErr
 		}
@@ -435,9 +438,12 @@ func handleUpdate(
 		}
 	}
 
-	// Find previously new values from theirs update (will be used as old values in rebased version)
+	// Find previously new values from theirs update (will be used as old values in rebased version).
+	// A renumbered key is our own inserted row: theirs' row with the old
+	// number is a different feature, so its updates don't apply.
+	renumbered := newPK != pk
 	patchedVals, wasUpdated := tableInfo.updated[pk]
-	if !wasUpdated {
+	if !wasUpdated || renumbered {
 		patchedVals = make([]changeset.Value, numColumns)
 	}
 
@@ -470,6 +476,14 @@ func handleUpdate(
 			outEntry.NewValues[i] = entry.NewValues[i]
 			if !entry.NewValues[i].IsUndefined() {
 				entryHasChanges = true
+			}
+		}
+	}
+
+	if renumbered {
+		for i := 0; i < numColumns; i++ {
+			if entry.Table.PrimaryKeys[i] {
+				outEntry.OldValues[i] = changeset.NewValueInt(int64(newPK))
 			}
 		}
 	}
