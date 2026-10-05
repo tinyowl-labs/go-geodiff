@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/tinyowl-labs/go-geodiff/geodiff"
@@ -222,19 +221,20 @@ func TestApplyRoundTrip(t *testing.T) {
 	if err := copyFileData(baseData, goPatchedPath); err != nil {
 		t.Fatalf("copy: %v", err)
 	}
-	// Go apply: will fail on Spatialite functions (ST_IsEmpty) since
-	// modernc.org/sqlite doesn't load the Spatialite extension. The C++ binary
-	// succeeds because it links against libspatialite. This is a known limitation.
 	if err := geodiff.ApplyChangeset(goPatchedPath, goDiffPath); err != nil {
-		if strings.Contains(err.Error(), "ST_IsEmpty") || strings.Contains(err.Error(), "no such function") {
-			t.Skip("Spatialite functions not available in modernc.org/sqlite; C++ apply succeeded")
-		}
 		t.Fatalf("Go ApplyChangeset failed: %v", err)
 	}
 
 	// Compare patched files
 	cppBytes, _ := os.ReadFile(cppPatchedPath)
 	goBytes, _ := os.ReadFile(goPatchedPath)
+	// Bytes 96-99 of the SQLite header hold the version of the library that
+	// last wrote the file, which differs between the two builds.
+	for _, b := range [][]byte{cppBytes, goBytes} {
+		if len(b) >= 100 {
+			copy(b[96:100], []byte{0, 0, 0, 0})
+		}
+	}
 
 	if !bytes.Equal(cppBytes, goBytes) {
 		t.Errorf("Patched files differ: C++=%d bytes, Go=%d bytes", len(cppBytes), len(goBytes))

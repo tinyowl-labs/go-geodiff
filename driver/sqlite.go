@@ -160,6 +160,7 @@ func (d *SqliteDriver) Open(ctx context.Context, conn ConnInfo) error {
 		dbPath = base
 	}
 
+	registerGpkgFunctions()
 	var err error
 	d.db, err = sql.Open("sqlite", dbPath+"?mode=rw")
 	if err != nil {
@@ -194,6 +195,7 @@ func (d *SqliteDriver) Create(ctx context.Context, conn ConnInfo, overwrite bool
 	if fileExistsCheck(base) {
 		return fmt.Errorf("unable to create sqlite3 database - already exists: %s", base)
 	}
+	registerGpkgFunctions()
 	var err error
 	d.db, err = sql.Open("sqlite", base)
 	if err != nil {
