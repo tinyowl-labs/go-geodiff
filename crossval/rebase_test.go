@@ -140,25 +140,22 @@ func TestRebaseCrossVal_ExistingFixtures(t *testing.T) {
 		t.Skip("C++ geodiff not available; set GEODIFF_CPP_BIN")
 	}
 
-	// NOTE: These fixtures use Spatialite functions (ST_IsEmpty) which require
-	// the Spatialite SQLite extension. go-geodiff uses modernc.org/sqlite which
-	// does not load Spatialite. The C++ geodiff binary loads it automatically.
-	// Until modernc.org/sqlite supports Spatialite, these fixtures can only be
-	// validated via the C++ binary's rebase-diff output, not via apply+rebase.
-	t.Skip("fixtures require Spatialite extension; not supported by modernc.org/sqlite")
-
 	testdataDir := filepath.Join(findProjectRoot(t), "testdata", "rebase_conflict")
 	base := filepath.Join("..", "testdata", "base.gpkg")
 
+	// For same-cell conflicts the rebased changeset is a known divergence
+	// (see TestRebaseCrossVal_SameCellConflict), so those cases compare the
+	// conflict files.
 	cases := []struct {
-		name   string
-		ours   string // base→ours diff
-		theirs string // base→theirs diff
+		name     string
+		ours     string // base→ours diff
+		theirs   string // base→theirs diff
+		conflict bool
 	}{
-		{"case1a", filepath.Join(testdataDir, "case1a.diff"), filepath.Join(testdataDir, "case1b.diff")},
-		{"case2a", filepath.Join(testdataDir, "case2a.diff"), filepath.Join(testdataDir, "case2b.diff")},
-		{"case3a", filepath.Join(testdataDir, "case3a.diff"), filepath.Join(testdataDir, "case3b.diff")},
-		{"case4a", filepath.Join(testdataDir, "case4a.diff"), filepath.Join(testdataDir, "case4b.diff")},
+		{"case1a", filepath.Join(testdataDir, "case1a.diff"), filepath.Join(testdataDir, "case1b.diff"), false},
+		{"case2a", filepath.Join(testdataDir, "case2a.diff"), filepath.Join(testdataDir, "case2b.diff"), false},
+		{"case3a", filepath.Join(testdataDir, "case3a.diff"), filepath.Join(testdataDir, "case3b.diff"), true},
+		{"case4a", filepath.Join(testdataDir, "case4a.diff"), filepath.Join(testdataDir, "case4b.diff"), true},
 	}
 
 	for _, tc := range cases {
@@ -193,6 +190,13 @@ func TestRebaseCrossVal_ExistingFixtures(t *testing.T) {
 				t.Fatalf("Go CreateRebasedChangeset: %v", err)
 			}
 
+			if tc.conflict {
+				cpp, got := readFile(t, cppConflicts), readFile(t, goConflicts)
+				if len(cpp) == 0 || !jsonEqual(t, cpp, got) {
+					t.Errorf("conflicts differ.\nC++:\n%s\nGo:\n%s", cpp, got)
+				}
+				return
+			}
 			compareFiles(t, cppRebased, goRebased, "rebase "+tc.name)
 		})
 	}

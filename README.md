@@ -41,6 +41,8 @@ This is a careful, function-by-function port of the C++ geodiff library (v2.3.0)
 
 Binary changeset files produced by go-geodiff are **byte-identical** to those produced by the C++ `geodiff` CLI — verified by cross-validation tests in `crossval/`.
 
+Applying a changeset to a GeoPackage with a spatial index runs its `rtree_*` triggers. Like upstream (through libgpkg), go-geodiff provides the functions they call: `ST_IsEmpty`, `ST_MinX`, `ST_MaxX`, `ST_MinY` and `ST_MaxY`. `modernc.org/sqlite` registers functions for the whole process, when the first driver opens; a function of the same name your program registered before that is kept.
+
 ## What's included
 
 | Package | Purpose |
