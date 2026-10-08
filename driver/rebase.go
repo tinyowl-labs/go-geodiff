@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
 )
 
 // ConflictItem / ConflictFeature are the typed rebase conflicts.

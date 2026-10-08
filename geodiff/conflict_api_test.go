@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
 )
 
 func copyAndExec(t *testing.T, src, dst, sqlStmt string) {

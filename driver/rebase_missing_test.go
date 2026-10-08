@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
 )
 
 // TestRebase_ConcurrentEditDifferentColumns verifies that when two branches

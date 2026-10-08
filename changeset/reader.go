@@ -14,7 +14,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/tinyowl-labs/go-geodiff/varint"
+	"github.com/BenDyson-Arch/go-geodiff/varint"
 )
 
 // Reader parses the binary changeset format from a file.

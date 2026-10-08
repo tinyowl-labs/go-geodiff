@@ -14,7 +14,7 @@ import (
 	"math"
 	"os"
 
-	"github.com/tinyowl-labs/go-geodiff/varint"
+	"github.com/BenDyson-Arch/go-geodiff/varint"
 )
 
 // Writer serializes ChangesetEntry values into the binary changeset format.

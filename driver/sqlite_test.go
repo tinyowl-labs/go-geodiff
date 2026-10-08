@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
-	"github.com/tinyowl-labs/go-geodiff/schema"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/schema"
 )
 
 // tmpFile creates a temporary file path relative to the system temp dir.

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/geodiff"
+	"github.com/BenDyson-Arch/go-geodiff/geodiff"
 )
 
 // runCpp runs the C++ geodiff binary with the given arguments.

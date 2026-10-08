@@ -1,4 +1,4 @@
-module github.com/tinyowl-labs/go-geodiff
+module github.com/BenDyson-Arch/go-geodiff
 
 go 1.25.0
 

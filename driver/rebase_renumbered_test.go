@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
 )
 
 func makeDeleteEntry2(tableName string, pk int, val string) changeset.ChangesetEntry {

@@ -12,8 +12,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
-	"github.com/tinyowl-labs/go-geodiff/schema"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/schema"
 )
 
 // Side indicates which database to query (base or modified).

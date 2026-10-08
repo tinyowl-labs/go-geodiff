@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/geodiff"
+	"github.com/BenDyson-Arch/go-geodiff/geodiff"
 	_ "modernc.org/sqlite"
 )
 
 // The fixtures in testdata/gpkg_rtree are GDAL GeoPackages with the default
 // spatial index. Applying a changeset runs the rtree_* triggers, which call
-// ST_IsEmpty and ST_MinX/MaxX/MinY/MaxY (tinyowl-labs/go-geodiff#3).
+// ST_IsEmpty and ST_MinX/MaxX/MinY/MaxY (BenDyson-Arch/go-geodiff#3).
 
 // indexedState dumps what an apply must get right: the features, the R-tree
 // rows GDAL's triggers maintain, the triggers themselves and the feature

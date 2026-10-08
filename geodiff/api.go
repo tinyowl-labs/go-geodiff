@@ -19,9 +19,9 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/tinyowl-labs/go-geodiff/changeset"
-	"github.com/tinyowl-labs/go-geodiff/driver"
-	"github.com/tinyowl-labs/go-geodiff/schema"
+	"github.com/BenDyson-Arch/go-geodiff/changeset"
+	"github.com/BenDyson-Arch/go-geodiff/driver"
+	"github.com/BenDyson-Arch/go-geodiff/schema"
 )
 
 // Version returns the library version string.

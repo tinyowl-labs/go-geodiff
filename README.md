@@ -7,7 +7,7 @@ Originally by [Lutra Consulting](https://www.lutraconsulting.co.uk/) (MIT). This
 ## Usage
 
 ```go
-import "github.com/tinyowl-labs/go-geodiff/geodiff"
+import "github.com/BenDyson-Arch/go-geodiff/geodiff"
 
 // Create a binary diff between two GPKG files
 err := geodiff.CreateChangeset("base.gpkg", "modified.gpkg", "changes.diff")

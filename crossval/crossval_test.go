@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tinyowl-labs/go-geodiff/geodiff"
+	"github.com/BenDyson-Arch/go-geodiff/geodiff"
 )
 
 // cppBin returns the path to the C++ geodiff binary, or empty string if not found.
